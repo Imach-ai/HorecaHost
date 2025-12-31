@@ -1,208 +1,424 @@
-const initSqlJs = require('sql.js');
+const { Pool } = require('pg');
 const path = require('path');
-const fs = require('fs');
 
-// Ensure data directory exists
-const dataDir = path.join(__dirname, 'data');
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
-}
+// Neon DB PostgreSQL connection configuration
+// Connection string from Neon DB pooler
+// Priority: 1. Environment variable (DATABASE_URL), 2. Default Neon DB connection
+const connectionString = process.env.DATABASE_URL || 
+  'postgresql://neondb_owner:npg_PAzsW7twcy9Y@ep-morning-cloud-ahuxkfoj-pooler.c-3.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
 
-const dbPath = path.join(dataDir, 'quotations.db');
+// Create connection pool with retry configuration
+const pool = new Pool({
+  connectionString: connectionString,
+  ssl: {
+    rejectUnauthorized: false // Neon DB requires SSL
+  },
+  connectionTimeoutMillis: 15000, // 15 seconds timeout
+  idleTimeoutMillis: 30000,
+  max: 20, // Maximum number of clients in the pool
+});
+
+// Test connection
+pool.on('connect', () => {
+  console.log('✅ Connected to PostgreSQL database');
+});
+
+pool.on('error', (err) => {
+  console.error('❌ Database pool error:', err.message);
+  // Don't exit process - allow retry
+});
 
 let db = null;
 
-// Helper to save database to file
-function saveDatabase() {
-  if (db && db.sqlDb) {
-    const data = db.sqlDb.export();
-    const buffer = Buffer.from(data);
-    fs.writeFileSync(dbPath, buffer);
-  }
-}
-
-// Auto-save every 5 seconds if there are changes
-let saveTimer = null;
-function scheduleSave() {
-  if (!saveTimer) {
-    saveTimer = setTimeout(() => {
-      saveDatabase();
-      saveTimer = null;
-    }, 5000);
-  }
-}
-
-// Wrapper class to provide better-sqlite3-like API
+// Wrapper class to provide SQLite-like API for compatibility
 class DatabaseWrapper {
-  constructor(sqlDb) {
-    this.sqlDb = sqlDb;
+  constructor(poolClient) {
+    this.pool = poolClient;
   }
 
-  prepare(sql) {
+  async prepare(sqlQuery) {
     const self = this;
+    // Convert SQLite syntax to PostgreSQL
+    const pgSql = this.convertSQLiteToPostgreSQL(sqlQuery);
+    
     return {
-      run(...params) {
-        self.sqlDb.run(sql, params);
-        scheduleSave();
-        return {
-          lastInsertRowid: self.sqlDb.exec("SELECT last_insert_rowid()")[0]?.values[0][0] || 0,
-          changes: self.sqlDb.getRowsModified()
-        };
-      },
-      get(...params) {
-        const stmt = self.sqlDb.prepare(sql);
-        stmt.bind(params);
-        if (stmt.step()) {
-          const row = stmt.getAsObject();
-          stmt.free();
-          return row;
+      async run(...params) {
+        try {
+          // pg package uses $1, $2, etc. for parameters
+          let result;
+          if (params && params.length > 0) {
+            // Convert ? to $1, $2, etc.
+            let paramIndex = 1;
+            const paramSql = pgSql.replace(/\?/g, () => `$${paramIndex++}`);
+            result = await self.pool.query(paramSql, params);
+          } else {
+            result = await self.pool.query(pgSql);
+          }
+          
+          // pg returns { rows, rowCount }, check if it has id property
+          const returnedId = result.rows && result.rows.length > 0 ? result.rows[0]?.id : null;
+          return {
+            lastInsertRowid: returnedId || 0,
+            changes: result.rowCount || 0,
+            insertId: returnedId
+          };
+        } catch (error) {
+          console.error('Database run error:', error);
+          throw error;
         }
-        stmt.free();
-        return undefined;
       },
-      all(...params) {
-        const results = [];
-        const stmt = self.sqlDb.prepare(sql);
-        stmt.bind(params);
-        while (stmt.step()) {
-          results.push(stmt.getAsObject());
+      async get(...params) {
+        try {
+          let result;
+          if (params && params.length > 0) {
+            let paramIndex = 1;
+            const paramSql = pgSql.replace(/\?/g, () => `$${paramIndex++}`);
+            result = await self.pool.query(paramSql, params);
+          } else {
+            result = await self.pool.query(pgSql);
+          }
+          return result.rows && result.rows.length > 0 ? result.rows[0] : undefined;
+        } catch (error) {
+          console.error('Database get error:', error);
+          throw error;
         }
-        stmt.free();
-        return results;
+      },
+      async all(...params) {
+        try {
+          let result;
+          if (params && params.length > 0) {
+            let paramIndex = 1;
+            const paramSql = pgSql.replace(/\?/g, () => `$${paramIndex++}`);
+            result = await self.pool.query(paramSql, params);
+          } else {
+            result = await self.pool.query(pgSql);
+          }
+          return result.rows || [];
+        } catch (error) {
+          console.error('Database all error:', error);
+          throw error;
+        }
       }
     };
   }
 
-  exec(sql) {
-    this.sqlDb.run(sql);
-    scheduleSave();
+  async exec(sqlQuery) {
+    try {
+      const pgSql = this.convertSQLiteToPostgreSQL(sqlQuery);
+      await this.pool.query(pgSql);
+    } catch (error) {
+      console.error('Database exec error:', error);
+      throw error;
+    }
   }
 
-  pragma(sql) {
-    this.sqlDb.run(`PRAGMA ${sql}`);
+  async pragma(sqlQuery) {
+    // PostgreSQL doesn't use PRAGMA, but we'll handle foreign keys in schema
+    // This is mainly for compatibility
+    if (sqlQuery.includes('foreign_keys')) {
+      // Foreign keys are enabled by default in PostgreSQL
+      return;
+    }
+  }
+
+  // Convert SQLite syntax to PostgreSQL
+  convertSQLiteToPostgreSQL(sqlQuery) {
+    let pgSql = sqlQuery;
+    
+    // Only replace ? if the SQL doesn't already use $ parameters
+    if (!/\$\d+/.test(pgSql)) {
+      // Replace ? with $1, $2, etc. for parameterized queries
+      let paramIndex = 1;
+      pgSql = pgSql.replace(/\?/g, () => `$${paramIndex++}`);
+    }
+    
+    // Replace INTEGER PRIMARY KEY AUTOINCREMENT with SERIAL PRIMARY KEY
+    pgSql = pgSql.replace(/INTEGER PRIMARY KEY AUTOINCREMENT/gi, 'SERIAL PRIMARY KEY');
+    
+    // Replace AUTOINCREMENT with SERIAL
+    pgSql = pgSql.replace(/AUTOINCREMENT/gi, '');
+    
+    // Replace REAL with NUMERIC or DECIMAL
+    pgSql = pgSql.replace(/\bREAL\b/gi, 'NUMERIC');
+    
+    // Replace DATETIME with TIMESTAMP
+    pgSql = pgSql.replace(/\bDATETIME\b/gi, 'TIMESTAMP');
+    
+    // Replace INSERT OR IGNORE with INSERT ... ON CONFLICT DO NOTHING
+    pgSql = pgSql.replace(/INSERT OR IGNORE INTO/gi, 'INSERT INTO');
+    
+    // Replace last_insert_rowid() with RETURNING id or lastval()
+    pgSql = pgSql.replace(/last_insert_rowid\(\)/gi, 'lastval()');
+    
+    return pgSql;
+  }
+
+  // Direct query method for complex queries
+  async query(sqlQuery, params) {
+    const pgSql = this.convertSQLiteToPostgreSQL(sqlQuery);
+    if (params && params.length > 0) {
+      // Convert ? to $1, $2, etc. for parameterized queries
+      let paramIndex = 1;
+      const paramSql = pgSql.replace(/\?/g, () => `$${paramIndex++}`);
+      return await this.pool.query(paramSql, params);
+    } else {
+      return await this.pool.query(pgSql);
+    }
   }
 }
 
 async function initializeDatabase() {
-  const SQL = await initSqlJs();
+  db = new DatabaseWrapper(pool);
+
+  // Retry connection logic
+  const maxRetries = 3;
+  let retryCount = 0;
   
-  // Load existing database or create new one
-  if (fs.existsSync(dbPath)) {
-    const fileBuffer = fs.readFileSync(dbPath);
-    db = new DatabaseWrapper(new SQL.Database(fileBuffer));
-    console.log('✅ Loaded existing database');
-  } else {
-    db = new DatabaseWrapper(new SQL.Database());
-    console.log('✅ Created new database');
+  while (retryCount < maxRetries) {
+    try {
+      // Test connection first
+      await pool.query('SELECT NOW()');
+      console.log('✅ Database connection successful');
+      break;
+    } catch (error) {
+      retryCount++;
+      if (retryCount >= maxRetries) {
+        console.error('❌ Failed to connect to database after', maxRetries, 'attempts');
+        console.error('Error:', error.message);
+        console.warn('⚠️  Server will start but database operations may fail');
+        console.warn('⚠️  Please check your network connection and Neon DB database status');
+        // Don't throw - allow server to start
+        return db;
+      }
+      console.warn(`⚠️  Database connection attempt ${retryCount}/${maxRetries} failed, retrying in 2 seconds...`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
   }
 
-  // Enable foreign keys
-  db.pragma('foreign_keys = ON');
+  try {
+    // Check existing tables first
+    const tablesResult = await pool.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+      ORDER BY table_name
+    `);
+    
+    const existingTables = tablesResult.rows.map(row => row.table_name);
+    console.log('📋 Existing tables in database:', existingTables.join(', ') || 'none');
+    
+    // Check if tables exist, only create if they don't
+    const tableExists = (tableName) => existingTables.includes(tableName);
+    
+    // Create brands table first (referenced by products)
+    if (!tableExists('brands')) {
+      console.log('📦 Creating brands table...');
+      await db.exec(`
+        CREATE TABLE brands (
+          id SERIAL PRIMARY KEY,
+          name_en VARCHAR(255) NOT NULL,
+          name_ar VARCHAR(255) NOT NULL,
+          slug VARCHAR(255) UNIQUE,
+          active BOOLEAN DEFAULT true,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+    } else {
+      console.log('✅ brands table already exists');
+    }
 
-  // Products table
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS products (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      ref_no TEXT UNIQUE NOT NULL,
-      name TEXT NOT NULL,
-      description TEXT,
-      model_no TEXT,
-      image_path TEXT,
-      unit_price REAL NOT NULL DEFAULT 0,
-      country TEXT,
-      category TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+    // Create categories table (referenced by products and subcategories)
+    if (!tableExists('categories')) {
+      console.log('📦 Creating categories table...');
+      await db.exec(`
+        CREATE TABLE categories (
+          id SERIAL PRIMARY KEY,
+          name_en VARCHAR(255) NOT NULL,
+          name_ar VARCHAR(255) NOT NULL,
+          slug VARCHAR(255) UNIQUE,
+          active BOOLEAN DEFAULT true,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+    } else {
+      console.log('✅ categories table already exists');
+    }
 
-  // Quotations table
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS quotations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      quotation_number TEXT UNIQUE NOT NULL,
-      customer_name TEXT NOT NULL,
-      customer_address TEXT,
-      customer_phone TEXT,
-      customer_email TEXT,
-      date DATE NOT NULL,
-      total REAL NOT NULL DEFAULT 0,
-      vat REAL NOT NULL DEFAULT 0,
-      grand_total REAL NOT NULL DEFAULT 0,
-      notes TEXT,
-      status TEXT DEFAULT 'draft',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+    // Create subcategories table (referenced by products)
+    if (!tableExists('subcategories')) {
+      console.log('📦 Creating subcategories table...');
+      await db.exec(`
+        CREATE TABLE subcategories (
+          id SERIAL PRIMARY KEY,
+          category_id INTEGER,
+          name_en VARCHAR(255) NOT NULL,
+          name_ar VARCHAR(255) NOT NULL,
+          slug VARCHAR(255) UNIQUE,
+          active BOOLEAN DEFAULT true,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
+        )
+      `);
+    } else {
+      console.log('✅ subcategories table already exists');
+    }
 
-  // Quotation items table
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS quotation_items (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      quotation_id INTEGER NOT NULL,
-      product_id INTEGER,
-      line_number INTEGER NOT NULL,
-      ref_no TEXT,
-      description TEXT,
-      model_no TEXT,
-      image_path TEXT,
-      qty INTEGER NOT NULL DEFAULT 1,
-      unit_price REAL NOT NULL DEFAULT 0,
-      line_total REAL NOT NULL DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (quotation_id) REFERENCES quotations(id) ON DELETE CASCADE,
-      FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
-    )
-  `);
+    // Create products table (referenced by quotation_items)
+    if (!tableExists('products')) {
+      console.log('📦 Creating products table...');
+      await db.exec(`
+        CREATE TABLE products (
+          id SERIAL PRIMARY KEY,
+          name_en VARCHAR(255) NOT NULL,
+          name_ar VARCHAR(255) NOT NULL,
+          brand_id INTEGER,
+          category_id INTEGER,
+          subcategory_id INTEGER,
+          model VARCHAR(255),
+          slug VARCHAR(255) UNIQUE,
+          price NUMERIC(10, 2),
+          discount_price NUMERIC(10, 2),
+          description_en TEXT,
+          description_ar TEXT,
+          specifications JSONB,
+          images JSONB,
+          active BOOLEAN DEFAULT true,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (brand_id) REFERENCES brands(id) ON DELETE SET NULL,
+          FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL,
+          FOREIGN KEY (subcategory_id) REFERENCES subcategories(id) ON DELETE SET NULL
+        )
+      `);
+    } else {
+      console.log('✅ products table already exists');
+    }
 
-  // Settings table for company info
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS settings (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      key TEXT UNIQUE NOT NULL,
-      value TEXT,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+    // Quotations table
+    if (!tableExists('quotations')) {
+      console.log('📦 Creating quotations table...');
+      await db.exec(`
+        CREATE TABLE quotations (
+          id SERIAL PRIMARY KEY,
+          quotation_number VARCHAR(255) UNIQUE NOT NULL,
+          customer_name VARCHAR(255) NOT NULL,
+          customer_address TEXT,
+          customer_phone VARCHAR(255),
+          customer_email VARCHAR(255),
+          date DATE NOT NULL,
+          total NUMERIC(10, 2) NOT NULL DEFAULT 0,
+          vat NUMERIC(10, 2) NOT NULL DEFAULT 0,
+          grand_total NUMERIC(10, 2) NOT NULL DEFAULT 0,
+          notes TEXT,
+          status VARCHAR(50) DEFAULT 'draft',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+    } else {
+      console.log('✅ quotations table already exists');
+    }
 
-  // Insert default settings if not exists
-  const defaultSettings = [
-    ['company_name', 'HORECA Equipment LLC'],
-    ['company_address', 'Dubai, United Arab Emirates'],
-    ['company_phone', '+971 4 XXX XXXX'],
-    ['company_email', 'info@horeca-equipment.com'],
-    ['company_website', 'www.horeca-equipment.com'],
-    ['company_trn', 'TRN: 100XXXXXXXXX'],
-    ['vat_rate', '5'],
-    ['currency', 'AED'],
-    ['terms_conditions', `1. Prices are valid for 30 days from the date of quotation.
+    // Quotation items table
+    if (!tableExists('quotation_items')) {
+      console.log('📦 Creating quotation_items table...');
+      await db.exec(`
+        CREATE TABLE quotation_items (
+          id SERIAL PRIMARY KEY,
+          quotation_id INTEGER NOT NULL,
+          product_id INTEGER,
+          line_number INTEGER NOT NULL,
+          ref_no VARCHAR(255),
+          description TEXT,
+          model_no VARCHAR(255),
+          image_path TEXT,
+          qty INTEGER NOT NULL DEFAULT 1,
+          unit_price NUMERIC(10, 2) NOT NULL DEFAULT 0,
+          line_total NUMERIC(10, 2) NOT NULL DEFAULT 0,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (quotation_id) REFERENCES quotations(id) ON DELETE CASCADE,
+          FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
+        )
+      `);
+    } else {
+      console.log('✅ quotation_items table already exists');
+    }
+
+    // Settings table for company info
+    if (!tableExists('settings')) {
+      console.log('📦 Creating settings table...');
+      await db.exec(`
+        CREATE TABLE settings (
+          id SERIAL PRIMARY KEY,
+          key VARCHAR(255) UNIQUE NOT NULL,
+          value TEXT,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+    } else {
+      console.log('✅ settings table already exists');
+    }
+
+    // Insert default settings if not exists
+    const defaultSettings = [
+      ['company_name', 'Horeca Host'],
+      ['company_address', 'Dubai, U.A.E'],
+      ['company_phone', '+971 50 307 9863'],
+      ['company_email', 'gm@horecahost.com'],
+      ['company_website', 'www.horecahost.com'],
+      ['company_trn', 'TRN: 100XXXXXXXXX'],
+      ['company_mobile', '+971 50 686 9484'],
+      ['company_manager', 'Abdul Kabeer – General Manager'],
+      ['vat_rate', '5'],
+      ['currency', 'AED'],
+      ['sales_terms', `Delivery: Delivery available stock now. Available in Dubai.
+Note: Any down payment made by the customer prior to order cancellation is not refundable.
+Thanks & waiting for your confirmation to enable us to proceed further.`],
+      ['vat_note', `Value Added Tax (VAT) will be applicable to all taxable transactions as per the UAE law. "Effective from January 2018"`],
+      ['quotation_message', `Waiting for your confirmation to enable us to proceed further.
+Best Regards,
+Abdul Kabeer – General Manager
+Horeca Host
+Tel: +971 50 307 9863 | Mobile: +971 50 686 9484
+Email: gm@horecahost.com | Web: www.horecahost.com | Dubai, U.A.E`],
+      ['terms_conditions', `1. Prices are valid for 30 days from the date of quotation.
 2. Payment terms: 50% advance, 50% before delivery.
 3. Delivery time: 2-4 weeks from order confirmation.
 4. Prices are exclusive of installation unless otherwise stated.
 5. All products carry manufacturer warranty.`],
-    ['delivery_warranty', `Delivery: Free delivery within Dubai. Other emirates subject to additional charges.
+      ['delivery_warranty', `Delivery: Free delivery within Dubai. Other emirates subject to additional charges.
 Warranty: All equipment comes with 1 year manufacturer warranty against manufacturing defects.
 Installation: Installation services available at additional cost.`],
-    ['bank_details', `Bank Name: Emirates NBD
-Account Name: HORECA Equipment LLC
+      ['bank_details', `Bank Name: Emirates NBD
+Account Name: Horeca Host
 Account No: XXXX XXXX XXXX XXXX
 IBAN: AE XX XXXX XXXX XXXX XXXX XXX`]
-  ];
+    ];
 
-  for (const [key, value] of defaultSettings) {
-    try {
-      db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run(key, value);
-    } catch (e) {
-      // Ignore if already exists
+    for (const [key, value] of defaultSettings) {
+      try {
+        await db.query(
+          'INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING',
+          [key, value]
+        );
+      } catch (e) {
+        // Ignore if already exists
+      }
     }
-  }
 
-  // Save initial database
-  saveDatabase();
-  
-  console.log('✅ Database initialized successfully');
-  return db;
+    console.log('✅ Database initialized successfully');
+    return db;
+  } catch (error) {
+    console.error('❌ Error initializing database:', error.message);
+    console.warn('⚠️  Server will continue but database operations may fail');
+    console.warn('⚠️  Error details:', error.code, error.errno);
+    // Don't throw - allow server to start even if DB init fails
+    // The app can still serve static files and show error messages
+    return db;
+  }
 }
 
 // Synchronous getter for the database (after initialization)
@@ -225,5 +441,5 @@ module.exports = {
   },
   initialize,
   getDb,
-  saveDatabase
+  pool // Export pool for direct access if needed
 };

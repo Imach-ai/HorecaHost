@@ -1,25 +1,56 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus, Search, Eye, Edit, Trash2, FileDown, FileText, Calendar, User } from 'lucide-react'
+import { Plus, Search, Eye, Edit, Trash2, FileDown, FileText, Calendar, User, ChevronLeft, ChevronRight } from 'lucide-react'
 import { quotationsApi } from '../api'
+import { formatCurrency, formatDate, getStatusBadgeStyles } from '../utils/formatters'
+import { useDebounce } from '../hooks/useDebounce'
+import { SEARCH_DEBOUNCE_MS } from '../utils/constants'
 
 function QuotationsPage() {
   const [quotations, setQuotations] = useState([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: 50,
+    total: 0,
+    totalPages: 0,
+    hasMore: false
+  })
+
+  // Debounce search input using custom hook
+  const debouncedSearch = useDebounce(searchTerm, SEARCH_DEBOUNCE_MS)
+  
+  // Reset to first page when search changes
+  useEffect(() => {
+    setPagination(prev => ({ ...prev, page: 1 }))
+  }, [debouncedSearch])
 
   useEffect(() => {
     loadQuotations()
-  }, [searchTerm, statusFilter])
+  }, [debouncedSearch, statusFilter, pagination.page])
 
   const loadQuotations = async () => {
     try {
+      setLoading(true)
       const response = await quotationsApi.getAll({ 
-        search: searchTerm, 
-        status: statusFilter 
+        search: debouncedSearch, 
+        status: statusFilter,
+        page: pagination.page,
+        limit: pagination.limit
       })
-      setQuotations(response.data)
+      
+      // Handle both old format (array) and new format (object with data and pagination)
+      if (Array.isArray(response.data)) {
+        setQuotations(response.data)
+      } else {
+        setQuotations(response.data.data || [])
+        setPagination(prev => ({
+          ...prev,
+          ...response.data.pagination
+        }))
+      }
     } catch (error) {
       console.error('Error loading quotations:', error)
     } finally {
@@ -44,30 +75,9 @@ function QuotationsPage() {
     window.open(url, '_blank')
   }
 
-  const formatCurrency = (amount) => {
-    return `AED ${parseFloat(amount || 0).toLocaleString('en-US', { 
-      minimumFractionDigits: 2, 
-      maximumFractionDigits: 2 
-    })}`
-  }
-
-  const formatDate = (dateStr) => {
-    return new Date(dateStr).toLocaleDateString('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric'
-    })
-  }
-
   const getStatusBadge = (status) => {
-    const styles = {
-      draft: 'bg-amber-100 text-amber-700 border-amber-200',
-      sent: 'bg-blue-100 text-blue-700 border-blue-200',
-      accepted: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-      rejected: 'bg-red-100 text-red-700 border-red-200'
-    }
     return (
-      <span className={`px-2.5 py-1 rounded-full text-xs font-semibold capitalize border ${styles[status] || styles.draft}`}>
+      <span className={`px-2.5 py-1 rounded-full text-xs font-semibold capitalize border ${getStatusBadgeStyles(status)}`}>
         {status || 'draft'}
       </span>
     )
@@ -257,6 +267,34 @@ function QuotationsPage() {
                 ))}
               </tbody>
             </table>
+            
+            {/* Pagination */}
+            {pagination.totalPages > 1 && (
+              <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200">
+                <div className="text-sm text-gray-600">
+                  Showing {((pagination.page - 1) * pagination.limit) + 1} to {Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total} quotations
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPagination(prev => ({ ...prev, page: prev.page - 1 }))}
+                    disabled={pagination.page === 1}
+                    className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <ChevronLeft size={18} />
+                  </button>
+                  <span className="text-sm text-gray-600 px-3">
+                    Page {pagination.page} of {pagination.totalPages}
+                  </span>
+                  <button
+                    onClick={() => setPagination(prev => ({ ...prev, page: prev.page + 1 }))}
+                    disabled={!pagination.hasMore}
+                    className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <ChevronRight size={18} />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Mobile Cards */}

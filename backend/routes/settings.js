@@ -38,9 +38,10 @@ const upload = multer({
 });
 
 // GET all settings
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
-    const settingsRows = db.prepare('SELECT key, value FROM settings').all();
+    const stmt = await db.prepare('SELECT key, value FROM settings');
+    const settingsRows = await stmt.all();
     const settings = {};
     for (const row of settingsRows) {
       settings[row.key] = row.value;
@@ -53,19 +54,20 @@ router.get('/', (req, res) => {
 });
 
 // PUT update settings
-router.put('/', (req, res) => {
+router.put('/', async (req, res) => {
   try {
-    const updateSetting = db.prepare(`
+    const updateStmt = await db.prepare(`
       INSERT INTO settings (key, value, updated_at) 
       VALUES (?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = CURRENT_TIMESTAMP
     `);
 
     for (const [key, value] of Object.entries(req.body)) {
-      updateSetting.run(key, value, value);
+      await updateStmt.run(key, value, value);
     }
 
-    const settingsRows = db.prepare('SELECT key, value FROM settings').all();
+    const settingsStmt = await db.prepare('SELECT key, value FROM settings');
+    const settingsRows = await settingsStmt.all();
     const settings = {};
     for (const row of settingsRows) {
       settings[row.key] = row.value;
@@ -78,7 +80,7 @@ router.put('/', (req, res) => {
 });
 
 // POST upload logo
-router.post('/logo', upload.single('logo'), (req, res) => {
+router.post('/logo', upload.single('logo'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
@@ -86,11 +88,12 @@ router.post('/logo', upload.single('logo'), (req, res) => {
 
     const logoPath = `/uploads/logo/${req.file.filename}`;
     
-    db.prepare(`
+    const stmt = await db.prepare(`
       INSERT INTO settings (key, value, updated_at) 
       VALUES ('company_logo', ?, CURRENT_TIMESTAMP)
       ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = CURRENT_TIMESTAMP
-    `).run(logoPath, logoPath);
+    `);
+    await stmt.run(logoPath, logoPath);
 
     res.json({ logo_path: logoPath });
   } catch (error) {
@@ -100,4 +103,3 @@ router.post('/logo', upload.single('logo'), (req, res) => {
 });
 
 module.exports = router;
-

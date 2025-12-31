@@ -12,45 +12,153 @@ body {
   font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
   background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
   min-height: 100vh;
+  @apply bg-gray-50 text-gray-900;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.dark body {
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  @apply bg-slate-900 text-slate-100;
+}
+
+/* Global dark mode overrides for common patterns */
+.dark h1, .dark h2, .dark h3, .dark h4, .dark h5, .dark h6 {
+  @apply text-slate-100;
+}
+
+/* Comprehensive dark mode styles for all common patterns */
+.dark .bg-white {
+  @apply bg-slate-800;
+}
+
+.dark .bg-gray-50 {
+  @apply bg-slate-900;
+}
+
+.dark .bg-gray-100 {
+  @apply bg-slate-700;
+}
+
+.dark .border-gray-100,
+.dark .border-gray-200 {
+  @apply border-slate-700;
+}
+
+.dark .border-gray-300 {
+  @apply border-slate-600;
+}
+
+.dark .text-gray-900,
+.dark .text-gray-800 {
+  @apply text-slate-100;
+}
+
+.dark .text-gray-700 {
+  @apply text-slate-200;
+}
+
+.dark .text-gray-600 {
+  @apply text-slate-400;
+}
+
+.dark .text-gray-500 {
+  @apply text-slate-500;
+}
+
+.dark .text-gray-400 {
+  @apply text-slate-500;
+}
+
+.dark .hover\:bg-gray-50:hover {
+  @apply bg-slate-700;
+}
+
+.dark .hover\:bg-gray-100:hover {
+  @apply bg-slate-600;
+}
+
+.dark .bg-gradient-to-br.from-gray-100.to-gray-200 {
+  @apply from-slate-700 to-slate-800;
+}
+
+/* Smooth transitions for theme changes - applied selectively */
+html, html *, html *::before, html *::after {
+  transition-property: background-color, border-color, color, fill, stroke, box-shadow;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+/* Exclude transitions for certain elements for performance */
+img, svg, video, canvas, audio, iframe, embed, object, 
+[class*="animate-"], [class*="transition-none"] {
+  transition-property: transform, opacity;
+  transition-duration: 0s;
+}
+
+:root {
+  --color-primary-50: #eff6ff;
+  --color-primary-100: #dbeafe;
+  --color-primary-200: #bfdbfe;
+  --color-primary-300: #93c5fd;
+  --color-primary-400: #60a5fa;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #2563eb;
+  --color-primary-700: #1d4ed8;
+  --color-primary-800: #1e40af;
+  --color-primary-900: #1e3a8a;
+  --border-radius: 0.75rem;
 }
 
 @layer components {
   .btn-primary {
-    @apply bg-primary-600 hover:bg-primary-700 text-white font-medium py-2.5 px-5 rounded-lg 
+    background-color: var(--color-primary-600);
+    @apply hover:bg-primary-700 text-white font-medium py-2.5 px-5 rounded-lg 
            transition-all duration-200 shadow-sm hover:shadow-md active:scale-[0.98]
-           focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2;
+           focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2
+           dark:focus:ring-offset-slate-800;
   }
 
   .btn-secondary {
     @apply bg-white hover:bg-gray-50 text-gray-700 font-medium py-2.5 px-5 rounded-lg 
            border border-gray-300 transition-all duration-200 shadow-sm hover:shadow
-           focus:outline-none focus:ring-2 focus:ring-gray-300 focus:ring-offset-2;
+           focus:outline-none focus:ring-2 focus:ring-gray-300 focus:ring-offset-2
+           dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 dark:border-slate-600
+           dark:focus:ring-offset-slate-900;
   }
 
   .btn-danger {
     @apply bg-red-600 hover:bg-red-700 text-white font-medium py-2.5 px-5 rounded-lg 
            transition-all duration-200 shadow-sm hover:shadow-md
-           focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2;
+           focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2
+           dark:focus:ring-offset-slate-800;
   }
 
   .btn-success {
     @apply bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2.5 px-5 rounded-lg 
            transition-all duration-200 shadow-sm hover:shadow-md
-           focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2;
+           focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2
+           dark:focus:ring-offset-slate-800;
   }
 
   .input-field {
-    @apply w-full px-4 py-2.5 border border-gray-300 rounded-lg bg-white
+    @apply w-full px-4 py-2.5 border border-gray-300 rounded-lg bg-white text-gray-900
            focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent
-           placeholder-gray-400 transition-all duration-200;
+           placeholder-gray-400 transition-all duration-200
+           dark:bg-slate-800 dark:border-slate-600 dark:text-slate-100 dark:placeholder-slate-400
+           dark:focus:ring-primary-500;
+    border-radius: var(--border-radius);
   }
 
   .card {
-    @apply bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden;
+    @apply bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden
+           dark:bg-slate-800 dark:border-slate-700;
+    border-radius: var(--border-radius);
+    transition: background-color 0.2s ease, border-color 0.2s ease;
   }
 
   .table-header {
-    @apply bg-gray-50 text-gray-600 text-xs font-semibold uppercase tracking-wider;
+    @apply bg-gray-50 text-gray-600 text-xs font-semibold uppercase tracking-wider
+           dark:bg-slate-700 dark:text-slate-300;
   }
 }
 
@@ -61,17 +169,17 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f5f9;
+  @apply bg-gray-100 dark:bg-slate-800;
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  @apply bg-gray-300 dark:bg-slate-600;
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  @apply bg-gray-400 dark:bg-slate-500;
 }
 
 /* Animations */

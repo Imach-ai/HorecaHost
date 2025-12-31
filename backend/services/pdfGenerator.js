@@ -106,10 +106,11 @@ async function generateQuotationPDF(quotation, settings) {
       {
         width: '*',
         stack: [
-          { text: settings.company_name || 'HORECA Equipment LLC', style: 'companyName' },
-          { text: settings.company_address || '', style: 'companyInfo', margin: [0, 4, 0, 0] },
-          { text: 'Tel: ' + (settings.company_phone || ''), style: 'companyInfo' },
+          { text: settings.company_name || 'Horeca Host', style: 'companyName' },
+          { text: settings.company_address || 'Dubai, U.A.E', style: 'companyInfo', margin: [0, 4, 0, 0] },
+          { text: 'Tel: ' + (settings.company_phone || '') + (settings.company_mobile ? ' | Mobile: ' + settings.company_mobile : ''), style: 'companyInfo' },
           { text: 'Email: ' + (settings.company_email || ''), style: 'companyInfo' },
+          { text: (settings.company_website ? 'Web: ' + settings.company_website : ''), style: 'companyInfo' },
           { text: settings.company_trn || '', style: 'companyInfo', margin: [0, 4, 0, 0] }
         ]
       },
@@ -232,12 +233,35 @@ async function generateQuotationPDF(quotation, settings) {
     margin: [280, 15, 0, 25]
   };
 
-  // Terms and conditions
+  // Sales Terms & Conditions Section
   const termsSection = [];
   
+  // Sales Terms & Conditions (Main section)
+  if (settings.sales_terms) {
+    termsSection.push(
+      { text: 'Sales Terms & Conditions:', style: 'sectionTitle', margin: [0, 20, 0, 8] },
+      { text: settings.sales_terms, style: 'termsText', margin: [0, 0, 0, 12] }
+    );
+  }
+
+  // VAT Note
+  if (settings.vat_note) {
+    termsSection.push(
+      { text: settings.vat_note, style: 'vatNote', margin: [0, 0, 0, 15] }
+    );
+  }
+
+  // Quotation Message (Professional closing message)
+  if (settings.quotation_message) {
+    termsSection.push(
+      { text: settings.quotation_message, style: 'quotationMessage', margin: [0, 0, 0, 20] }
+    );
+  }
+
+  // Additional Terms & Conditions (if exists)
   if (settings.terms_conditions) {
     termsSection.push(
-      { text: 'Terms & Conditions:', style: 'sectionTitle', margin: [0, 0, 0, 6] },
+      { text: 'Additional Terms & Conditions:', style: 'sectionTitle', margin: [0, 0, 0, 6] },
       { text: settings.terms_conditions, style: 'termsText', margin: [0, 0, 0, 15] }
     );
   }
@@ -252,17 +276,19 @@ async function generateQuotationPDF(quotation, settings) {
   if (settings.bank_details) {
     termsSection.push(
       { text: 'Bank Details:', style: 'sectionTitle', margin: [0, 0, 0, 6] },
-      { text: settings.bank_details, style: 'termsText' }
+      { text: settings.bank_details, style: 'termsText', margin: [0, 0, 0, 15] }
     );
   }
 
-  // Signature section
+  // Signature section with manager details
+  const managerName = settings.company_manager || 'General Manager';
   const signatureSection = {
     columns: [
       {
         width: '50%',
         stack: [
-          { text: 'For ' + (settings.company_name || 'HORECA Equipment LLC'), fontSize: 10, margin: [0, 40, 0, 35] },
+          { text: 'For ' + (settings.company_name || 'Horeca Host'), fontSize: 10, bold: true, margin: [0, 40, 0, 8] },
+          { text: managerName, fontSize: 9, color: '#64748b', margin: [0, 0, 0, 35] },
           { text: '____________________________', fontSize: 10, color: '#cbd5e1' },
           { text: 'Authorized Signature', style: 'signatureLabel', margin: [0, 6, 0, 0] }
         ]
@@ -270,7 +296,7 @@ async function generateQuotationPDF(quotation, settings) {
       {
         width: '50%',
         stack: [
-          { text: 'Customer Acceptance', fontSize: 10, margin: [0, 40, 0, 35] },
+          { text: 'Customer Acceptance', fontSize: 10, bold: true, margin: [0, 40, 0, 35] },
           { text: '____________________________', fontSize: 10, color: '#cbd5e1' },
           { text: 'Signature & Date', style: 'signatureLabel', margin: [0, 6, 0, 0] }
         ]
@@ -321,7 +347,9 @@ async function generateQuotationPDF(quotation, settings) {
       customerInfo: { fontSize: 10, color: '#64748b' },
       tableHeader: { fontSize: 8, bold: true, color: '#1e3a5f', margin: [0, 6, 0, 6] },
       sectionTitle: { fontSize: 10, bold: true, color: '#1e3a5f' },
-      termsText: { fontSize: 8, color: '#64748b' },
+      termsText: { fontSize: 8, color: '#64748b', lineHeight: 1.4 },
+      vatNote: { fontSize: 8, color: '#64748b', italics: true, lineHeight: 1.4 },
+      quotationMessage: { fontSize: 9, color: '#1e293b', lineHeight: 1.5 },
       signatureLabel: { fontSize: 9, color: '#94a3b8' }
     },
     defaultStyle: {

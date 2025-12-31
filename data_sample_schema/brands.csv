@@ -1,0 +1,39 @@
+id,name_en,name_ar,slug,country_en,country_ar,active,created_at,updated_at
+8,Hamilton Beach,هاميلتون بيتش,hamilton-beach,United States,الولايات المتحدة,true,2024-06-11 15:09:35+00,2025-01-28 01:05:27+00
+9,Santos,سانتوس,santos,France,فرنسا,true,2024-06-11 15:13:21+00,2025-02-17 01:06:48+00
+18,NEMCO,نيمكو,nemco,United States,الولايات المتحدة,true,2024-08-25 19:35:31+00,2025-01-28 01:07:09+00
+23,Biro,بيرو,biro,United States,الولايات المتحدة,true,2024-08-25 19:42:13+00,2025-01-28 01:07:46+00
+25,Imperial,إمبيريال,imperial,United States,الولايات المتحدة,true,2024-09-12 16:45:46+00,2025-01-28 01:08:44+00
+27,PizzaMaster,بيتزا ماستر,pizzamaster,United States,الولايات المتحدة,true,2024-09-13 02:32:36+00,2025-01-28 01:09:46+00
+30,"Klimasan ",كليماسان,klimasan,Turkey,تركيا,true,2024-10-21 12:14:23+00,2025-01-28 01:10:46+00
+31,Williams,ويليامز,williams,United States,الولايات المتحدة,true,2024-10-22 14:47:22+00,2025-01-28 01:11:15+00
+32,HDS,HDS,hds,United States,الولايات المتحدة,true,2024-11-16 00:48:18+00,2025-01-28 01:11:45+00
+33,La Pavoni,La Pavoni,la-pavoni,Italy,إيطاليا,true,2024-11-26 12:15:58+00,2025-01-28 01:12:37+00
+34,Futurmat,Futurnat,futurmat,Italy,إيطاليا,true,2024-11-28 10:33:09+00,2025-01-28 01:12:54+00
+35,Gaggia,Gaggia,gaggia,Italy,إيطاليا,true,2024-11-28 16:32:02+00,2025-01-28 01:13:20+00
+36,Macpan,Macpan,macpan,Italy,إيطاليا,true,2024-12-04 16:10:28+00,2025-01-28 01:13:53+00
+37,SAP,SAP,sap,Italy,إيطاليا,true,2024-12-13 18:53:14+00,2025-01-28 01:14:08+00
+38,Continental Forni,Continental Forni,continental-forni,Italy,إيطاليا,true,2024-12-18 00:54:48+00,2025-01-28 01:14:26+00
+39,VULCAN,VULCAN,vulcan,United States,الولايات المتحدة,true,2024-12-30 13:44:26+00,2025-01-28 01:14:42+00
+40,precision refrigeration,precision refrigeration,precision-refrigeration,United Kingdom,المملكة المتحدة,true,2024-12-31 01:38:41+00,2025-02-17 00:56:48+00
+41,Scotsman,Scotsman,scotsman,Italy,إيطاليا,true,2025-01-17 12:14:06+00,2025-01-28 01:15:57+00
+43,Robot coupe,Robot coupe,robot-coupe,France,فرنسا,true,2025-01-27 12:04:09+00,2025-01-28 15:38:36+00
+44,Brand 44,العلامة 44,brand-44,Unknown,غير معروف,true,2025-12-08 13:03:45.464455+00,2025-12-08 13:03:45.464455+00
+45,Waring,Waring,waring,United States,الولايات المتحدة,true,2025-01-30 19:17:48+00,2025-01-30 19:17:48+00
+46,Turbo Air,Turbo Air,turbo-air,Italy,إيطاليا,true,2025-01-30 20:10:26+00,2025-01-30 20:18:19+00
+47,frymaster,frymaster,frymaster,United States,الولايات المتحدة,true,2025-01-31 16:51:17+00,2025-01-31 16:51:17+00
+48,Henny Penny,Henny Penny,henny-penny,United States,الولايات المتحدة,true,2025-01-31 18:58:39+00,2025-01-31 18:58:39+00
+49,Fagor,Fagor,fagor,Spain,إسبانيا,true,2025-02-06 13:07:20+00,2025-02-06 13:07:20+00
+51,Tecfrigo,Tecfrigo,tecfrigo,Italy,إيطاليا,true,2025-02-08 18:39:12+00,2025-02-17 01:15:18+00
+52,Slayer,Slayer,slayer,United States,الولايات المتحدة,true,2025-02-15 12:54:18+00,2025-02-15 12:54:18+00
+53,Mahlkonig,Mahlkonig,mahlkonig,Germany,ألمانيا,true,2025-02-15 13:19:35+00,2025-02-17 01:14:39+00
+54,Mazzer,Mazzer,mazzer,Italy,إيطاليا,true,2025-02-15 14:00:12+00,2025-02-15 14:00:12+00
+55,Menu Master,Menu Master,menu-master,United States,الولايات المتحدة,true,2025-03-03 13:43:30+00,2025-03-03 13:43:30+00
+56,DoughXpress,DoughXpress,doughxpress,United States,الولايات المتحدة,true,2025-03-20 14:52:33+00,2025-03-20 14:52:33+00
+59,Groen,Groen,groen,United States,الولايات المتحدة,true,2025-04-16 10:39:54+00,2025-04-16 10:39:54+00
+60,Rational,Rational,rational,United States,الولايات المتحدة,true,2025-04-24 05:43:37+00,2025-04-24 05:43:37+00
+61,Other,Other,other,,,true,2025-04-24 12:01:25+00,2025-04-24 12:01:25+00
+62,Hatco,Hatco,hatco,United States,الولايات المتحدة,true,2025-04-30 12:24:34+00,2025-04-30 12:24:34+00
+71,La Marzocco,La Marzocco,la-marzocco,,,true,2025-09-27 13:35:10+00,2025-09-27 13:35:10+00
+72,EMPERO,EMPERO,empero,Turkey,تركيا,true,2025-12-04 17:39:15+00,2025-12-04 17:39:15+00
+73,Cold-era,Cold-era,cold-era,Turkey,تركيا,true,2025-12-06 15:56:25+00,2025-12-06 15:56:25+00

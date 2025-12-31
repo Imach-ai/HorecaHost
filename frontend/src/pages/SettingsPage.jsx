@@ -1,18 +1,24 @@
 import { useState, useEffect } from 'react'
-import { Save, Upload, Building2 } from 'lucide-react'
+import { Save, Upload, Building2, Palette } from 'lucide-react'
 import { settingsApi } from '../api'
+import ThemeCustomizer from '../components/ThemeCustomizer'
 
 function SettingsPage() {
   const [settings, setSettings] = useState({
     company_name: '',
     company_address: '',
     company_phone: '',
+    company_mobile: '',
     company_email: '',
     company_website: '',
     company_trn: '',
+    company_manager: '',
     company_logo: '',
     vat_rate: '5',
     currency: 'AED',
+    sales_terms: '',
+    vat_note: '',
+    quotation_message: '',
     terms_conditions: '',
     delivery_warranty: '',
     bank_details: ''
@@ -89,10 +95,10 @@ function SettingsPage() {
   }
 
   return (
-    <div className="animate-fadeIn max-w-4xl">
+    <div className="animate-fadeIn max-w-5xl">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-800">Settings</h1>
-        <p className="text-gray-500 mt-1">Configure your company information and quotation defaults</p>
+        <p className="text-gray-500 mt-1">Configure your company information, theme, and quotation defaults</p>
       </div>
 
       {successMessage && (
@@ -103,6 +109,20 @@ function SettingsPage() {
           {successMessage}
         </div>
       )}
+
+      {/* Theme Customization Section */}
+      <div className="card p-6 mb-6">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="p-2 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg">
+            <Palette className="text-white" size={24} />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-gray-800">Theme Customization</h2>
+            <p className="text-sm text-gray-500">Personalize the look and feel of your application</p>
+          </div>
+        </div>
+        <ThemeCustomizer />
+      </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Company Information */}
@@ -202,6 +222,20 @@ function SettingsPage() {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
+                Mobile
+              </label>
+              <input
+                type="tel"
+                name="company_mobile"
+                value={settings.company_mobile}
+                onChange={handleInputChange}
+                className="input-field"
+                placeholder="+971 50 XXX XXXX"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
                 Email
               </label>
               <input
@@ -211,6 +245,20 @@ function SettingsPage() {
                 onChange={handleInputChange}
                 className="input-field"
                 placeholder="info@company.com"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                General Manager Name
+              </label>
+              <input
+                type="text"
+                name="company_manager"
+                value={settings.company_manager}
+                onChange={handleInputChange}
+                className="input-field"
+                placeholder="e.g., Abdul Kabeer – General Manager"
               />
             </div>
 
@@ -271,14 +319,65 @@ function SettingsPage() {
           </div>
         </div>
 
-        {/* Terms & Conditions */}
+        {/* Sales Terms & Quotation Message */}
         <div className="card p-6">
-          <h2 className="text-lg font-semibold text-gray-800 mb-4">Terms & Conditions</h2>
+          <h2 className="text-lg font-semibold text-gray-800 mb-4">Sales Terms & Quotation Message</h2>
           
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Terms & Conditions
+                Sales Terms & Conditions *
+              </label>
+              <textarea
+                name="sales_terms"
+                value={settings.sales_terms}
+                onChange={handleInputChange}
+                rows={4}
+                className="input-field resize-none"
+                placeholder="Delivery: Delivery available stock now. Available in Dubai.&#10;Note: Any down payment made by the customer prior to order cancellation is not refundable.&#10;Thanks & waiting for your confirmation to enable us to proceed further."
+              />
+              <p className="text-xs text-gray-500 mt-1">This will appear prominently in the quotation PDF</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                VAT Note
+              </label>
+              <textarea
+                name="vat_note"
+                value={settings.vat_note}
+                onChange={handleInputChange}
+                rows={2}
+                className="input-field resize-none"
+                placeholder='Value Added Tax (VAT) will be applicable to all taxable transactions as per the UAE law. "Effective from January 2018"'
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Quotation Closing Message *
+              </label>
+              <textarea
+                name="quotation_message"
+                value={settings.quotation_message}
+                onChange={handleInputChange}
+                rows={6}
+                className="input-field resize-none"
+                placeholder="Waiting for your confirmation to enable us to proceed further.&#10;Best Regards,&#10;[Manager Name]&#10;[Company Name]&#10;Tel: +971 XXX | Mobile: +971 XXX&#10;Email: email@company.com | Web: www.company.com | Dubai, U.A.E"
+              />
+              <p className="text-xs text-gray-500 mt-1">Professional closing message with manager details</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Terms & Conditions */}
+        <div className="card p-6">
+          <h2 className="text-lg font-semibold text-gray-800 mb-4">Additional Terms & Conditions</h2>
+          
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Additional Terms & Conditions
               </label>
               <textarea
                 name="terms_conditions"

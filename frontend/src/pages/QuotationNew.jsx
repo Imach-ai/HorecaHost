@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, Trash2, Save, ArrowLeft, Search, X, Package, ChevronRight, PlusCircle } from 'lucide-react'
 import { quotationsApi, productsApi, settingsApi } from '../api'
+import { PRODUCTS_INITIAL_LOAD, PRODUCTS_SEARCH_LIMIT } from '../utils/constants'
+import { useDebounce } from '../hooks/useDebounce'
+import { SEARCH_DEBOUNCE_MS } from '../utils/constants'
 
 function QuotationNew() {
   const navigate = useNavigate()
@@ -38,12 +41,19 @@ function QuotationNew() {
 
   const loadInitialData = async () => {
     try {
+      // Load only minimal product data initially (faster)
       const [productsRes, settingsRes, nextNumberRes] = await Promise.all([
-        productsApi.getAll(),
+        productsApi.getAll({ minimal: true, active: true, limit: PRODUCTS_INITIAL_LOAD }),
         settingsApi.getAll(),
         quotationsApi.getNextNumber()
       ])
-      setProducts(productsRes.data)
+      
+      // Handle both array and paginated response
+      const productsData = Array.isArray(productsRes.data) 
+        ? productsRes.data 
+        : (productsRes.data.data || [])
+      
+      setProducts(productsData)
       setSettings(settingsRes.data)
       setQuotationNumber(nextNumberRes.data.quotation_number)
     } catch (error) {
@@ -52,6 +62,38 @@ function QuotationNew() {
       setLoading(false)
     }
   }
+  
+  // Debounce product search
+  const debouncedProductSearch = useDebounce(productSearch, SEARCH_DEBOUNCE_MS)
+  
+  // Load products on search
+  useEffect(() => {
+    if (!debouncedProductSearch.trim()) {
+      // Reset to initial products when search is cleared
+      loadInitialData()
+      return
+    }
+    
+    const loadSearchResults = async () => {
+      try {
+        const response = await productsApi.getAll({ 
+          search: debouncedProductSearch, 
+          minimal: true,
+          active: true,
+          limit: PRODUCTS_SEARCH_LIMIT
+        })
+        const productsData = Array.isArray(response.data) 
+          ? response.data 
+          : (response.data.data || [])
+        setProducts(productsData)
+      } catch (error) {
+        console.error('Error searching products:', error)
+      }
+    }
+    
+    loadSearchResults()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedProductSearch])
 
   const handleInputChange = (e) => {
     const { name, value } = e.target
@@ -81,18 +123,32 @@ function QuotationNew() {
     }))
   }
 
+  const getProductImage = (product) => {
+    if (!product.images || !product.id) return ''
+    try {
+      const images = typeof product.images === 'string' ? JSON.parse(product.images) : product.images
+      if (!Array.isArray(images) || images.length === 0) return ''
+      
+      // Use backend proxy endpoint to fetch from FTP
+      return `/api/images/product/${product.id}`
+    } catch {
+      return ''
+    }
+  }
+
   const selectProduct = (product) => {
     setFormData(prev => {
       const newItems = [...prev.items]
+      const imageUrl = getProductImage(product)
       const newItem = {
         product_id: product.id,
-        ref_no: product.ref_no,
-        name: product.name,
-        description: product.description || product.name,
-        model_no: product.model_no || '',
-        image_path: product.image_path || '',
+        ref_no: product.slug || '',
+        name: product.name_en || product.name_ar || '',
+        description: product.description_en || product.description_ar || product.name_en || product.name_ar || '',
+        model_no: product.model || '',
+        image_path: imageUrl,
         qty: 1,
-        unit_price: parseFloat(product.unit_price) || 0
+        unit_price: parseFloat(product.price) || 0
       }
       
       if (currentItemIndex !== null && currentItemIndex < newItems.length) {
@@ -175,18 +231,42 @@ function QuotationNew() {
     }
   }
 
-  const formatCurrency = (amount) => {
-    return `AED ${parseFloat(amount || 0).toLocaleString('en-US', { 
+  const formatCurrency = (amount, currency = settings.currency || 'AED') => {
+    const currencySymbols = {
+      'USD': '$',
+      'AED': 'AED',
+      'GBP': '£',
+      'EUR': '€'
+    }
+    const symbol = currencySymbols[currency] || currency
+    return `${symbol} ${parseFloat(amount || 0).toLocaleString('en-US', { 
       minimumFractionDigits: 2, 
       maximumFractionDigits: 2 
     })}`
   }
 
-  const filteredProducts = products.filter(p => 
-    p.name.toLowerCase().includes(productSearch.toLowerCase()) ||
-    p.ref_no.toLowerCase().includes(productSearch.toLowerCase()) ||
-    (p.model_no && p.model_no.toLowerCase().includes(productSearch.toLowerCase()))
-  )
+  const getProductCurrency = (product) => {
+    if (!product.specifications) return settings.currency || 'AED'
+    try {
+      const specs = typeof product.specifications === 'string' 
+        ? JSON.parse(product.specifications) 
+        : product.specifications
+      return specs.currency || settings.currency || 'AED'
+    } catch {
+      return settings.currency || 'AED'
+    }
+  }
+
+  const filteredProducts = products.filter(p => {
+    const search = productSearch.toLowerCase()
+    return (
+      (p.name_en && p.name_en.toLowerCase().includes(search)) ||
+      (p.name_ar && p.name_ar.toLowerCase().includes(search)) ||
+      (p.slug && p.slug.toLowerCase().includes(search)) ||
+      (p.model && p.model.toLowerCase().includes(search)) ||
+      (p.brand_name_en && p.brand_name_en.toLowerCase().includes(search))
+    )
+  })
 
   const { total, vat, grandTotal } = calculateTotals()
 
@@ -375,7 +455,9 @@ function QuotationNew() {
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Unit Price (AED)</label>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">
+                          Unit Price ({settings.currency || 'AED'})
+                        </label>
                         <input
                           type="number"
                           min="0"
@@ -532,26 +614,60 @@ function QuotationNew() {
                     </div>
                   ) : (
                     <div className="divide-y divide-gray-100">
-                      {filteredProducts.map(product => (
-                        <button
-                          key={product.id}
-                          type="button"
-                          onClick={() => selectProduct(product)}
-                          className="w-full p-4 text-left hover:bg-primary-50 transition-colors flex items-center gap-4 group"
-                        >
-                          <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-gray-800 group-hover:text-primary-700">{product.name}</p>
-                            <p className="text-sm text-gray-500 mt-0.5 line-clamp-2">{product.description}</p>
-                            {product.model_no && (
-                              <p className="text-xs text-gray-400 mt-1">Model: {product.model_no}</p>
+                      {filteredProducts.map(product => {
+                        const imageUrl = getProductImage(product)
+                        return (
+                          <button
+                            key={product.id}
+                            type="button"
+                            onClick={() => selectProduct(product)}
+                            className="w-full p-4 text-left hover:bg-primary-50 transition-colors flex items-center gap-4 group"
+                          >
+                            {imageUrl && (
+                              <div className="flex-shrink-0 w-16 h-16 rounded-lg overflow-hidden bg-gray-100">
+                                <img src={imageUrl} alt={product.name_en} className="w-full h-full object-cover" />
+                              </div>
                             )}
-                          </div>
-                          <div className="text-right flex-shrink-0">
-                            <p className="font-bold text-primary-600">{formatCurrency(product.unit_price)}</p>
-                          </div>
-                          <ChevronRight size={18} className="text-gray-300 group-hover:text-primary-500" />
-                        </button>
-                      ))}
+                            <div className="flex-1 min-w-0">
+                              <p className="font-semibold text-gray-800 group-hover:text-primary-700">
+                                {product.name_en || product.name_ar}
+                              </p>
+                              {product.name_ar && product.name_en && (
+                                <p className="text-xs text-gray-500 mt-0.5" dir="rtl">{product.name_ar}</p>
+                              )}
+                              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                {product.brand_name_en && (
+                                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
+                                    {product.brand_name_en}
+                                  </span>
+                                )}
+                                {product.category_name_en && (
+                                  <span className="text-xs bg-primary-50 text-primary-600 px-2 py-0.5 rounded">
+                                    {product.category_name_en}
+                                  </span>
+                                )}
+                                {product.model && (
+                                  <span className="text-xs text-gray-400">Model: {product.model}</span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="text-right flex-shrink-0">
+                              {(() => {
+                                const currency = getProductCurrency(product)
+                                return product.discount_price && parseFloat(product.discount_price) < parseFloat(product.price) ? (
+                                  <div>
+                                    <p className="font-bold text-emerald-600">{formatCurrency(product.discount_price, currency)}</p>
+                                    <p className="text-xs text-gray-400 line-through">{formatCurrency(product.price, currency)}</p>
+                                  </div>
+                                ) : (
+                                  <p className="font-bold text-primary-600">{formatCurrency(product.price, currency)}</p>
+                                )
+                              })()}
+                            </div>
+                            <ChevronRight size={18} className="text-gray-300 group-hover:text-primary-500" />
+                          </button>
+                        )
+                      })}
                     </div>
                   )}
                 </div>
@@ -595,7 +711,9 @@ function QuotationNew() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Unit Price (AED)</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Unit Price ({settings.currency || 'AED'})
+                    </label>
                     <input
                       type="number"
                       min="0"

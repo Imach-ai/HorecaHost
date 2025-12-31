@@ -5,16 +5,17 @@ const { generateQuotationPDF } = require('../services/pdfGenerator');
 const router = express.Router();
 
 // Generate unique quotation number
-function generateQuotationNumber() {
+async function generateQuotationNumber() {
   const year = new Date().getFullYear();
   const month = String(new Date().getMonth() + 1).padStart(2, '0');
   
   // Get the last quotation number for this month
-  const lastQuotation = db.prepare(`
+  const stmt = await db.prepare(`
     SELECT quotation_number FROM quotations 
-    WHERE quotation_number LIKE ? 
+    WHERE quotation_number LIKE ?
     ORDER BY id DESC LIMIT 1
-  `).get(`QT-${year}${month}-%`);
+  `);
+  const lastQuotation = await stmt.get(`QT-${year}${month}-%`);
 
   let sequence = 1;
   if (lastQuotation) {
@@ -25,11 +26,30 @@ function generateQuotationNumber() {
   return `QT-${year}${month}-${String(sequence).padStart(4, '0')}`;
 }
 
-// GET all quotations
-router.get('/', (req, res) => {
+// GET all quotations with pagination
+router.get('/', async (req, res) => {
   try {
-    const { status, search, startDate, endDate } = req.query;
-    let query = 'SELECT * FROM quotations';
+    const { 
+      status, 
+      search, 
+      startDate, 
+      endDate,
+      page = 1,
+      limit = 50,
+      sortBy = 'created_at',
+      sortOrder = 'DESC'
+    } = req.query;
+    
+    const pageNum = parseInt(page);
+    const limitNum = Math.min(parseInt(limit), 100); // Max 100 per page
+    const offset = (pageNum - 1) * limitNum;
+    
+    // Validate sortBy to prevent SQL injection
+    const allowedSortColumns = ['created_at', 'date', 'quotation_number', 'customer_name', 'grand_total', 'status'];
+    const sortColumn = allowedSortColumns.includes(sortBy) ? sortBy : 'created_at';
+    const sortDir = sortOrder.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+    
+    // Build WHERE conditions
     const params = [];
     const conditions = [];
 
@@ -38,8 +58,8 @@ router.get('/', (req, res) => {
       params.push(status);
     }
     if (search) {
-      conditions.push('(customer_name LIKE ? OR quotation_number LIKE ?)');
       const searchTerm = `%${search}%`;
+      conditions.push('(customer_name ILIKE ? OR quotation_number ILIKE ?)');
       params.push(searchTerm, searchTerm);
     }
     if (startDate) {
@@ -51,14 +71,38 @@ router.get('/', (req, res) => {
       params.push(endDate);
     }
 
-    if (conditions.length > 0) {
-      query += ' WHERE ' + conditions.join(' AND ');
-    }
-
-    query += ' ORDER BY created_at DESC';
-
-    const quotations = db.prepare(query).all(...params);
-    res.json(quotations);
+    const whereClause = conditions.length > 0 ? ' WHERE ' + conditions.join(' AND ') : '';
+    
+    // Get total count for pagination
+    const countQuery = `SELECT COUNT(*) as total FROM quotations${whereClause}`;
+    const countStmt = await db.prepare(countQuery);
+    const countResult = await countStmt.get(...params);
+    const total = parseInt(countResult.total || 0);
+    
+    // Get paginated results - only select needed columns
+    const dataQuery = `
+      SELECT 
+        id, quotation_number, customer_name, customer_email, 
+        date, total, vat, grand_total, status, created_at, updated_at
+      FROM quotations
+      ${whereClause}
+      ORDER BY ${sortColumn} ${sortDir}
+      LIMIT ? OFFSET ?
+    `;
+    
+    const stmt = await db.prepare(dataQuery);
+    const quotations = await stmt.all(...params, limitNum, offset);
+    
+    res.json({
+      data: quotations,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum),
+        hasMore: offset + limitNum < total
+      }
+    });
   } catch (error) {
     console.error('Error fetching quotations:', error);
     res.status(500).json({ error: 'Failed to fetch quotations' });
@@ -66,18 +110,20 @@ router.get('/', (req, res) => {
 });
 
 // GET single quotation with items
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
-    const quotation = db.prepare('SELECT * FROM quotations WHERE id = ?').get(req.params.id);
+    const stmt = await db.prepare('SELECT * FROM quotations WHERE id = ?');
+    const quotation = await stmt.get(req.params.id);
     if (!quotation) {
       return res.status(404).json({ error: 'Quotation not found' });
     }
 
-    const items = db.prepare(`
+    const itemsStmt = await db.prepare(`
       SELECT * FROM quotation_items 
-      WHERE quotation_id = ? 
+      WHERE quotation_id = ?
       ORDER BY line_number
-    `).all(req.params.id);
+    `);
+    const items = await itemsStmt.all(req.params.id);
 
     res.json({ ...quotation, items });
   } catch (error) {
@@ -87,7 +133,7 @@ router.get('/:id', (req, res) => {
 });
 
 // POST create quotation
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const { 
       customer_name, 
@@ -104,7 +150,7 @@ router.post('/', (req, res) => {
       return res.status(400).json({ error: 'Customer name and at least one item are required' });
     }
 
-    const quotation_number = generateQuotationNumber();
+    const quotation_number = await generateQuotationNumber();
 
     // Calculate totals
     let total = 0;
@@ -114,16 +160,19 @@ router.post('/', (req, res) => {
     }
 
     // Get VAT rate from settings
-    const vatRateSetting = db.prepare('SELECT value FROM settings WHERE key = ?').get('vat_rate');
+    const vatStmt = await db.prepare('SELECT value FROM settings WHERE key = ?');
+    const vatRateSetting = await vatStmt.get('vat_rate');
     const vatRate = parseFloat(vatRateSetting?.value || 5) / 100;
     const vat = total * vatRate;
     const grand_total = total + vat;
 
     // Insert quotation
-    const result = db.prepare(`
+    const insertStmt = await db.prepare(`
       INSERT INTO quotations (quotation_number, customer_name, customer_address, customer_phone, customer_email, date, total, vat, grand_total, notes, status)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+      RETURNING id
+    `);
+    const result = await insertStmt.run(
       quotation_number,
       customer_name,
       customer_address || '',
@@ -137,10 +186,10 @@ router.post('/', (req, res) => {
       status || 'draft'
     );
 
-    const quotationId = result.lastInsertRowid;
+    const quotationId = result.insertId || result.lastInsertRowid;
 
     // Insert items
-    const insertItem = db.prepare(`
+    const insertItemStmt = await db.prepare(`
       INSERT INTO quotation_items (quotation_id, product_id, line_number, ref_no, description, model_no, image_path, qty, unit_price, line_total)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
@@ -149,16 +198,38 @@ router.post('/', (req, res) => {
       const item = items[i];
       const lineTotal = (parseFloat(item.qty) || 0) * (parseFloat(item.unit_price) || 0);
       
-      // Get image_path from product if not provided
+      // Get image from product if not provided (products.images is JSONB array)
       let imagePath = item.image_path || '';
       if (!imagePath && item.product_id) {
-        const product = db.prepare('SELECT image_path FROM products WHERE id = ?').get(item.product_id);
-        if (product && product.image_path) {
-          imagePath = product.image_path;
+        const productStmt = await db.prepare('SELECT images, name_en, name_ar, model, price FROM products WHERE id = ?');
+        const product = await productStmt.get(item.product_id);
+        if (product) {
+          // Get first image from images array if available
+          if (product.images) {
+            try {
+              const images = typeof product.images === 'string' ? JSON.parse(product.images) : product.images;
+              if (Array.isArray(images) && images.length > 0) {
+                imagePath = images[0];
+              }
+            } catch (e) {
+              // Ignore parse errors
+            }
+          }
+          // Use product name and model for description if not provided
+          if (!item.description) {
+            item.description = product.name_en || product.name_ar || '';
+          }
+          if (!item.model_no && product.model) {
+            item.model_no = product.model;
+          }
+          // Use product price if unit_price not provided
+          if (!item.unit_price && product.price) {
+            item.unit_price = product.price;
+          }
         }
       }
       
-      insertItem.run(
+      await insertItemStmt.run(
         quotationId,
         item.product_id || null,
         i + 1,
@@ -172,8 +243,10 @@ router.post('/', (req, res) => {
       );
     }
 
-    const quotation = db.prepare('SELECT * FROM quotations WHERE id = ?').get(quotationId);
-    const savedItems = db.prepare('SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY line_number').all(quotationId);
+    const quotationStmt = await db.prepare('SELECT * FROM quotations WHERE id = ?');
+    const quotation = await quotationStmt.get(quotationId);
+    const itemsStmt = await db.prepare('SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY line_number');
+    const savedItems = await itemsStmt.all(quotationId);
 
     res.status(201).json({ ...quotation, items: savedItems });
   } catch (error) {
@@ -183,7 +256,7 @@ router.post('/', (req, res) => {
 });
 
 // PUT update quotation
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { 
@@ -197,7 +270,8 @@ router.put('/:id', (req, res) => {
       items 
     } = req.body;
 
-    const existing = db.prepare('SELECT * FROM quotations WHERE id = ?').get(id);
+    const existingStmt = await db.prepare('SELECT * FROM quotations WHERE id = ?');
+    const existing = await existingStmt.get(id);
     if (!existing) {
       return res.status(404).json({ error: 'Quotation not found' });
     }
@@ -209,19 +283,21 @@ router.put('/:id', (req, res) => {
       total += lineTotal;
     }
 
-    const vatRateSetting = db.prepare('SELECT value FROM settings WHERE key = ?').get('vat_rate');
+    const vatStmt = await db.prepare('SELECT value FROM settings WHERE key = ?');
+    const vatRateSetting = await vatStmt.get('vat_rate');
     const vatRate = parseFloat(vatRateSetting?.value || 5) / 100;
     const vat = total * vatRate;
     const grand_total = total + vat;
 
     // Update quotation
-    db.prepare(`
+    const updateStmt = await db.prepare(`
       UPDATE quotations 
       SET customer_name = ?, customer_address = ?, customer_phone = ?, customer_email = ?,
           date = ?, total = ?, vat = ?, grand_total = ?, notes = ?, status = ?,
           updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
-    `).run(
+    `);
+    await updateStmt.run(
       customer_name,
       customer_address || '',
       customer_phone || '',
@@ -237,9 +313,10 @@ router.put('/:id', (req, res) => {
 
     // Delete existing items and re-insert
     if (items && items.length > 0) {
-      db.prepare('DELETE FROM quotation_items WHERE quotation_id = ?').run(id);
+      const deleteStmt = await db.prepare('DELETE FROM quotation_items WHERE quotation_id = ?');
+      await deleteStmt.run(id);
 
-      const insertItem = db.prepare(`
+      const insertItemStmt = await db.prepare(`
         INSERT INTO quotation_items (quotation_id, product_id, line_number, ref_no, description, model_no, image_path, qty, unit_price, line_total)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
@@ -248,16 +325,38 @@ router.put('/:id', (req, res) => {
         const item = items[i];
         const lineTotal = (parseFloat(item.qty) || 0) * (parseFloat(item.unit_price) || 0);
         
-        // Get image_path from product if not provided
+        // Get image from product if not provided (products.images is JSONB array)
         let imagePath = item.image_path || '';
         if (!imagePath && item.product_id) {
-          const product = db.prepare('SELECT image_path FROM products WHERE id = ?').get(item.product_id);
-          if (product && product.image_path) {
-            imagePath = product.image_path;
+          const productStmt = await db.prepare('SELECT images, name_en, name_ar, model, price FROM products WHERE id = ?');
+          const product = await productStmt.get(item.product_id);
+          if (product) {
+            // Get first image from images array if available
+            if (product.images) {
+              try {
+                const images = typeof product.images === 'string' ? JSON.parse(product.images) : product.images;
+                if (Array.isArray(images) && images.length > 0) {
+                  imagePath = images[0];
+                }
+              } catch (e) {
+                // Ignore parse errors
+              }
+            }
+            // Use product name and model for description if not provided
+            if (!item.description) {
+              item.description = product.name_en || product.name_ar || '';
+            }
+            if (!item.model_no && product.model) {
+              item.model_no = product.model;
+            }
+            // Use product price if unit_price not provided
+            if (!item.unit_price && product.price) {
+              item.unit_price = product.price;
+            }
           }
         }
         
-        insertItem.run(
+        await insertItemStmt.run(
           id,
           item.product_id || null,
           i + 1,
@@ -272,8 +371,10 @@ router.put('/:id', (req, res) => {
       }
     }
 
-    const quotation = db.prepare('SELECT * FROM quotations WHERE id = ?').get(id);
-    const savedItems = db.prepare('SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY line_number').all(id);
+    const quotationStmt = await db.prepare('SELECT * FROM quotations WHERE id = ?');
+    const quotation = await quotationStmt.get(id);
+    const itemsStmt = await db.prepare('SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY line_number');
+    const savedItems = await itemsStmt.all(id);
 
     res.json({ ...quotation, items: savedItems });
   } catch (error) {
@@ -283,16 +384,18 @@ router.put('/:id', (req, res) => {
 });
 
 // DELETE quotation
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const existing = db.prepare('SELECT * FROM quotations WHERE id = ?').get(id);
+    const existingStmt = await db.prepare('SELECT * FROM quotations WHERE id = ?');
+    const existing = await existingStmt.get(id);
     if (!existing) {
       return res.status(404).json({ error: 'Quotation not found' });
     }
 
-    db.prepare('DELETE FROM quotations WHERE id = ?').run(id);
+    const deleteStmt = await db.prepare('DELETE FROM quotations WHERE id = ?');
+    await deleteStmt.run(id);
     res.json({ message: 'Quotation deleted successfully' });
   } catch (error) {
     console.error('Error deleting quotation:', error);
@@ -303,19 +406,22 @@ router.delete('/:id', (req, res) => {
 // GET quotation PDF
 router.get('/:id/pdf', async (req, res) => {
   try {
-    const quotation = db.prepare('SELECT * FROM quotations WHERE id = ?').get(req.params.id);
+    const stmt = await db.prepare('SELECT * FROM quotations WHERE id = ?');
+    const quotation = await stmt.get(req.params.id);
     if (!quotation) {
       return res.status(404).json({ error: 'Quotation not found' });
     }
 
-    const items = db.prepare(`
+    const itemsStmt = await db.prepare(`
       SELECT * FROM quotation_items 
-      WHERE quotation_id = ? 
+      WHERE quotation_id = ?
       ORDER BY line_number
-    `).all(req.params.id);
+    `);
+    const items = await itemsStmt.all(req.params.id);
 
     // Get settings
-    const settingsRows = db.prepare('SELECT key, value FROM settings').all();
+    const settingsStmt = await db.prepare('SELECT key, value FROM settings');
+    const settingsRows = await settingsStmt.all();
     const settings = {};
     for (const row of settingsRows) {
       settings[row.key] = row.value;
@@ -333,9 +439,9 @@ router.get('/:id/pdf', async (req, res) => {
 });
 
 // GET next quotation number (for preview)
-router.get('/meta/next-number', (req, res) => {
+router.get('/meta/next-number', async (req, res) => {
   try {
-    const nextNumber = generateQuotationNumber();
+    const nextNumber = await generateQuotationNumber();
     res.json({ quotation_number: nextNumber });
   } catch (error) {
     console.error('Error generating quotation number:', error);
@@ -344,4 +450,3 @@ router.get('/meta/next-number', (req, res) => {
 });
 
 module.exports = router;
-
