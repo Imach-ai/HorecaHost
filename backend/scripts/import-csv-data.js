@@ -95,13 +95,16 @@ async function importBrands(csvPath) {
         // Update existing
         const updateStmt = await db.prepare(`
           UPDATE brands 
-          SET name_en = ?, name_ar = ?, slug = ?, active = ?, updated_at = CURRENT_TIMESTAMP
+          SET name_en = ?, name_ar = ?, slug = ?, country_en = ?, country_ar = ?, flag_image = ?, active = ?, updated_at = CURRENT_TIMESTAMP
           WHERE id = ?
         `);
         await updateStmt.run(
           brand.name_en || '',
           brand.name_ar || '',
           brand.slug || '',
+          brand.country_en || null,
+          brand.country_ar || null,
+          brand.flag_image || null,
           toBoolean(brand.active),
           brand.id
         );
@@ -110,14 +113,17 @@ async function importBrands(csvPath) {
       } else {
         // Insert new - use explicit ID and update sequence
         const insertStmt = await db.prepare(`
-          INSERT INTO brands (id, name_en, name_ar, slug, active, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO brands (id, name_en, name_ar, slug, country_en, country_ar, flag_image, active, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
         await insertStmt.run(
           parseInt(brand.id),
           brand.name_en || '',
           brand.name_ar || '',
           brand.slug || '',
+          brand.country_en || null,
+          brand.country_ar || null,
+          brand.flag_image || null,
           toBoolean(brand.active),
           brand.created_at || new Date().toISOString(),
           brand.updated_at || new Date().toISOString()

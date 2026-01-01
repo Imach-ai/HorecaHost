@@ -1,6 +1,8 @@
 const PdfPrinter = require('pdfmake');
 const path = require('path');
 const fs = require('fs');
+const https = require('https');
+const http = require('http');
 
 // Define fonts - use built-in pdfmake fonts
 let fonts = {};
@@ -49,10 +51,55 @@ try {
 
 const printer = new PdfPrinter(fonts);
 
+// Helper function to fetch image from URL and convert to base64
+function fetchImageBase64(url) {
+  return new Promise((resolve, reject) => {
+    if (!url || !url.startsWith('http')) {
+      resolve(null);
+      return;
+    }
+
+    const protocol = url.startsWith('https') ? https : http;
+    
+    protocol.get(url, (response) => {
+      if (response.statusCode !== 200) {
+        resolve(null);
+        return;
+      }
+
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => {
+        try {
+          const imageBuffer = Buffer.concat(chunks);
+          const contentType = response.headers['content-type'] || 'image/png';
+          const mimeType = contentType.split('/')[1] || 'png';
+          const base64 = imageBuffer.toString('base64');
+          resolve(`data:image/${mimeType};base64,${base64}`);
+        } catch (error) {
+          console.error('Error processing image from URL:', url, error.message);
+          resolve(null);
+        }
+      });
+    }).on('error', (error) => {
+      console.error('Error fetching image from URL:', url, error.message);
+      resolve(null);
+    }).setTimeout(5000, () => {
+      resolve(null); // Timeout after 5 seconds
+    });
+  });
+}
+
 // Helper function to convert image to base64 for PDF
 function getImageBase64(imagePath) {
   try {
     if (!imagePath) return null;
+    
+    // Handle HTTP/HTTPS URLs
+    if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+      // This will be handled asynchronously, return null for now and handle in async context
+      return null;
+    }
     
     // Handle relative paths
     let fullPath = imagePath;
@@ -76,6 +123,68 @@ function getImageBase64(imagePath) {
   }
 }
 
+// Country code mapping for flag URLs
+const countryCodeMap = {
+  'united states': 'us',
+  'france': 'fr',
+  'germany': 'de',
+  'italy': 'it',
+  'spain': 'es',
+  'united kingdom': 'gb',
+  'japan': 'jp',
+  'china': 'cn',
+  'south korea': 'kr',
+  'canada': 'ca',
+  'australia': 'au',
+  'netherlands': 'nl',
+  'belgium': 'be',
+  'switzerland': 'ch',
+  'sweden': 'se',
+  'norway': 'no',
+  'denmark': 'dk',
+  'finland': 'fi',
+  'poland': 'pl',
+  'austria': 'at',
+  'portugal': 'pt',
+  'greece': 'gr',
+  'turkey': 'tr',
+  'india': 'in',
+  'brazil': 'br',
+  'mexico': 'mx',
+  'argentina': 'ar',
+  'south africa': 'za',
+  'egypt': 'eg',
+  'saudi arabia': 'sa',
+  'uae': 'ae',
+  'united arab emirates': 'ae',
+  'kuwait': 'kw',
+  'qatar': 'qa',
+  'bahrain': 'bh',
+  'oman': 'om',
+  'jordan': 'jo',
+  'lebanon': 'lb',
+  'singapore': 'sg',
+  'malaysia': 'my',
+  'thailand': 'th',
+  'indonesia': 'id',
+  'philippines': 'ph',
+  'vietnam': 'vn',
+  'new zealand': 'nz',
+  'ireland': 'ie',
+  'israel': 'il',
+  'czech republic': 'cz',
+  'hungary': 'hu',
+  'romania': 'ro',
+  'russia': 'ru',
+  'ukraine': 'ua',
+};
+
+function getCountryCode(countryName) {
+  if (!countryName) return null;
+  const normalized = countryName.toLowerCase().trim();
+  return countryCodeMap[normalized] || null;
+}
+
 // Format currency
 function formatCurrency(amount, currency) {
   currency = currency || 'AED';
@@ -94,8 +203,8 @@ function formatDate(dateStr) {
 }
 
 async function generateQuotationPDF(quotation, settings) {
-  const currency = settings.currency || 'AED';
-  const vatRate = parseFloat(settings.vat_rate || 5);
+  const currency = quotation.currency || settings.currency || 'AED';
+  const vatRate = parseFloat(quotation.vat_rate || settings.vat_rate || 5);
 
   // Build header content
   const headerContent = [];
@@ -174,6 +283,8 @@ async function generateQuotationPDF(quotation, settings) {
   ];
 
   const items = quotation.items || [];
+  const flagImagePromises = [];
+  
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     const lineNumber = item.line_number || (i + 1);
@@ -195,15 +306,137 @@ async function generateQuotationPDF(quotation, settings) {
       }
     }
     
+    // Build description with brand and country flag at bottom
+    const descriptionStack = [];
+    
+    // Add full description (preserve line breaks)
+    if (item.description) {
+      // Split by newlines and add each line
+      const descLines = item.description.split('\n');
+      descLines.forEach((line, idx) => {
+        if (line.trim()) {
+          descriptionStack.push({ 
+            text: line.trim(), 
+            fontSize: 9,
+            margin: [0, idx === 0 ? 0 : 2, 0, idx === descLines.length - 1 ? 4 : 0]
+          });
+        }
+      });
+    }
+    
+    // Add brand and country flag at bottom
+    if (item.brand_name_en || item.brand_country_en) {
+      // Build brand text
+      const brandTextParts = [];
+      if (item.brand_name_en) {
+        brandTextParts.push(item.brand_name_en);
+      }
+      if (item.brand_country_en) {
+        brandTextParts.push(`(${item.brand_country_en})`);
+      }
+      
+      if (brandTextParts.length > 0) {
+        const brandText = brandTextParts.join(' ');
+        
+        // Try to get flag image URL
+        let flagImageUrl = null;
+        if (item.brand_flag_image) {
+          flagImageUrl = item.brand_flag_image;
+        } else if (item.brand_country_en) {
+          const countryCode = getCountryCode(item.brand_country_en);
+          if (countryCode) {
+            flagImageUrl = `https://flagcdn.com/w20/${countryCode}.png`;
+          }
+        }
+        
+        // Store flag URL for async fetching
+        if (flagImageUrl) {
+          flagImagePromises.push({
+            index: i,
+            url: flagImageUrl,
+            brandText: brandText
+          });
+        }
+        
+        // For now, add text only - flag will be added after async fetch
+        descriptionStack.push({
+          text: brandText,
+          fontSize: 7,
+          color: '#64748b',
+          italics: true,
+          margin: [0, 4, 0, 0]
+        });
+      }
+    }
+    
+    // Ensure description stack is never empty
+    if (descriptionStack.length === 0) {
+      descriptionStack.push({ text: '-', fontSize: 9 });
+    }
+    
     itemsTableBody.push([
       { text: String(lineNumber), alignment: 'center', margin: [0, 12, 0, 12] },
       { text: item.model_no || '-', alignment: 'center', margin: [0, 12, 0, 12], fontSize: 9 },
-      { text: item.description || '-', alignment: 'left', margin: [6, 8, 6, 8], fontSize: 9 },
+      { 
+        stack: descriptionStack,
+        alignment: 'left', 
+        margin: [6, 8, 6, 8]
+      },
       imageCell,
       { text: String(item.qty || 1), alignment: 'center', margin: [0, 12, 0, 12], bold: true },
       { text: formatCurrency(item.unit_price, currency), alignment: 'right', margin: [0, 12, 6, 12], fontSize: 9 },
       { text: formatCurrency(item.line_total || lineTotal, currency), alignment: 'right', margin: [0, 12, 6, 12], bold: true, fontSize: 9 }
     ]);
+  }
+
+  // Fetch all flag images asynchronously and update description stacks
+  if (flagImagePromises.length > 0) {
+    const flagImages = {};
+    await Promise.all(
+      flagImagePromises.map(async (promise) => {
+        const base64 = await fetchImageBase64(promise.url);
+        if (base64) {
+          flagImages[promise.index] = {
+            image: base64,
+            brandText: promise.brandText
+          };
+        }
+      })
+    );
+    
+    // Update description stacks with flag images
+    for (let i = 0; i < itemsTableBody.length; i++) {
+      if (i === 0) continue; // Skip header row
+      const rowIndex = i - 1; // Adjust for header (items start at index 0)
+      if (flagImages[rowIndex]) {
+        const descCell = itemsTableBody[i][2]; // Description is 3rd column (index 2)
+        if (descCell && descCell.stack && Array.isArray(descCell.stack)) {
+          // Find the brand text entry and replace with image + text
+          const brandIndex = descCell.stack.findIndex(s => 
+            s.text && s.text.includes(flagImages[rowIndex].brandText)
+          );
+          if (brandIndex !== -1) {
+            descCell.stack[brandIndex] = {
+              columns: [
+                { 
+                  image: flagImages[rowIndex].image, 
+                  width: 12, 
+                  height: 8,
+                  margin: [0, 2, 3, 0]
+                },
+                { 
+                  text: flagImages[rowIndex].brandText, 
+                  fontSize: 7, 
+                  color: '#64748b',
+                  italics: true
+                }
+              ],
+              margin: [0, 4, 0, 0]
+            };
+          }
+        }
+      }
+    }
   }
 
   // Totals section
@@ -309,14 +542,16 @@ async function generateQuotationPDF(quotation, settings) {
   // Column widths: NO(25) | MODEL(55) | DESC(*) | IMAGE(55) | QTY(30) | PRICE(60) | TOTAL(65)
   const docDefinition = {
     pageSize: 'A4',
-    pageMargins: [35, 35, 35, 50],
+    pageMargins: [40, 80, 40, 60], // Left, Top, Right, Bottom - optimized for better pagination
     content: [
       ...headerContent,
       {
         table: {
           headerRows: 1,
           widths: [25, 55, '*', 55, 30, 60, 65],
-          body: itemsTableBody
+          body: itemsTableBody,
+          dontBreakRows: true, // Keep rows together - don't split rows across pages
+          keepWithHeaderRows: 1 // Repeat header on each new page
         },
         layout: {
           hLineWidth: function(i, node) { 
@@ -332,9 +567,18 @@ async function generateQuotationPDF(quotation, settings) {
           paddingBottom: function() { return 4; }
         }
       },
-      totalsTable,
+      { text: '', margin: [0, 15, 0, 0] }, // Spacing before totals
+      {
+        ...totalsTable,
+        pageBreak: 'avoid' // Try to keep totals on same page
+      },
+      { text: '', margin: [0, 15, 0, 0] }, // Spacing before terms
       ...termsSection,
-      signatureSection
+      { text: '', margin: [0, 20, 0, 0] }, // Spacing before signature
+      {
+        ...signatureSection,
+        pageBreak: 'avoid' // Keep signature section together
+      }
     ],
     styles: {
       companyName: { fontSize: 16, bold: true, color: '#1e3a5f' },
@@ -355,7 +599,8 @@ async function generateQuotationPDF(quotation, settings) {
     defaultStyle: {
       font: 'Roboto',
       fontSize: 10,
-      color: '#374151'
+      color: '#374151',
+      lineHeight: 1.2
     },
     footer: function(currentPage, pageCount) {
       return {
@@ -363,23 +608,46 @@ async function generateQuotationPDF(quotation, settings) {
         alignment: 'center',
         fontSize: 8,
         color: '#94a3b8',
-        margin: [35, 15]
+        margin: [40, 10, 40, 0]
       };
     }
   };
 
   return new Promise(function(resolve, reject) {
     try {
+      // Validate document definition before creating PDF
+      if (!docDefinition.content || !Array.isArray(docDefinition.content)) {
+        throw new Error('Invalid PDF document definition: content is missing or not an array');
+      }
+      
+      if (!itemsTableBody || itemsTableBody.length === 0) {
+        throw new Error('No items to include in PDF');
+      }
+      
       const pdfDoc = printer.createPdfKitDocument(docDefinition);
       const chunks = [];
       
-      pdfDoc.on('data', function(chunk) { chunks.push(chunk); });
-      pdfDoc.on('end', function() { resolve(Buffer.concat(chunks)); });
-      pdfDoc.on('error', function(err) { reject(err); });
+      pdfDoc.on('data', function(chunk) { 
+        chunks.push(chunk); 
+      });
+      
+      pdfDoc.on('end', function() { 
+        if (chunks.length === 0) {
+          reject(new Error('PDF generation produced no data'));
+          return;
+        }
+        resolve(Buffer.concat(chunks)); 
+      });
+      
+      pdfDoc.on('error', function(err) { 
+        console.error('PDFKit error:', err);
+        reject(err); 
+      });
       
       pdfDoc.end();
     } catch (error) {
       console.error('PDF generation error:', error);
+      console.error('Error stack:', error.stack);
       reject(error);
     }
   });

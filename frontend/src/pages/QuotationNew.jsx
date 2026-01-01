@@ -32,6 +32,8 @@ function QuotationNew() {
     date: new Date().toISOString().split('T')[0],
     notes: '',
     status: 'draft',
+    currency: 'AED',
+    vat_rate: 5,
     items: []
   })
 
@@ -54,8 +56,16 @@ function QuotationNew() {
         : (productsRes.data.data || [])
       
       setProducts(productsData)
-      setSettings(settingsRes.data)
+      const settingsData = settingsRes.data
+      setSettings(settingsData)
       setQuotationNumber(nextNumberRes.data.quotation_number)
+      
+      // Set default currency and VAT from settings
+      setFormData(prev => ({
+        ...prev,
+        currency: prev.currency || settingsData.currency || 'AED',
+        vat_rate: prev.vat_rate || settingsData.vat_rate || 5
+      }))
     } catch (error) {
       console.error('Error loading initial data:', error)
     } finally {
@@ -97,7 +107,13 @@ function QuotationNew() {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target
-    setFormData(prev => ({ ...prev, [name]: value }))
+    // For VAT rate, ensure it's a valid number
+    if (name === 'vat_rate') {
+      const numValue = value === '' ? '' : parseFloat(value)
+      setFormData(prev => ({ ...prev, [name]: isNaN(numValue) ? '' : numValue }))
+    } else {
+      setFormData(prev => ({ ...prev, [name]: value }))
+    }
   }
 
   const addProductItem = () => {
@@ -197,7 +213,11 @@ function QuotationNew() {
   }
 
   const calculateTotals = () => {
-    const vatRate = parseFloat(settings.vat_rate || 5) / 100
+    // Get VAT rate from formData, fallback to settings, default to 5
+    const vatRateValue = formData.vat_rate !== undefined && formData.vat_rate !== '' 
+      ? parseFloat(formData.vat_rate) 
+      : parseFloat(settings.vat_rate || 5)
+    const vatRate = vatRateValue / 100
     const total = formData.items.reduce((sum, item) => {
       return sum + ((parseFloat(item.qty) || 0) * (parseFloat(item.unit_price) || 0))
     }, 0)
@@ -231,12 +251,13 @@ function QuotationNew() {
     }
   }
 
-  const formatCurrency = (amount, currency = settings.currency || 'AED') => {
+  const formatCurrency = (amount, currency = formData.currency || settings.currency || 'AED') => {
     const currencySymbols = {
       'USD': '$',
       'AED': 'AED',
       'GBP': '£',
-      'EUR': '€'
+      'EUR': '€',
+      'SAR': 'SAR'
     }
     const symbol = currencySymbols[currency] || currency
     return `${symbol} ${parseFloat(amount || 0).toLocaleString('en-US', { 
@@ -358,6 +379,36 @@ function QuotationNew() {
                 className="input-field"
               />
             </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Currency</label>
+              <select
+                name="currency"
+                value={formData.currency}
+                onChange={handleInputChange}
+                className="input-field"
+              >
+                <option value="AED">AED - UAE Dirham</option>
+                <option value="USD">USD - US Dollar</option>
+                <option value="SAR">SAR - Saudi Riyal</option>
+                <option value="GBP">GBP - British Pound</option>
+                <option value="EUR">EUR - Euro</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">VAT Rate (%)</label>
+              <input
+                type="number"
+                name="vat_rate"
+                value={formData.vat_rate}
+                onChange={handleInputChange}
+                min="0"
+                max="100"
+                step="0.01"
+                className="input-field"
+                placeholder="Enter VAT rate (e.g., 0, 5, 10)"
+              />
+              <p className="text-xs text-gray-500 mt-1">Common: 0% or 5%</p>
+            </div>
           </div>
         </div>
 
@@ -456,7 +507,7 @@ function QuotationNew() {
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">
-                          Unit Price ({settings.currency || 'AED'})
+                          Unit Price ({formData.currency || settings.currency || 'AED'})
                         </label>
                         <input
                           type="number"
@@ -500,7 +551,7 @@ function QuotationNew() {
                     <span className="font-semibold text-gray-800">{formatCurrency(total)}</span>
                   </div>
                   <div className="flex justify-between text-gray-600">
-                    <span>VAT ({settings.vat_rate || 5}%):</span>
+                    <span>VAT ({formData.vat_rate !== undefined && formData.vat_rate !== '' ? formData.vat_rate : (settings.vat_rate || 5)}%):</span>
                     <span className="font-semibold text-gray-800">{formatCurrency(vat)}</span>
                   </div>
                 </div>

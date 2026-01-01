@@ -30,6 +30,8 @@ function QuotationEdit() {
     date: '',
     notes: '',
     status: 'draft',
+    currency: 'AED',
+    vat_rate: 5,
     items: []
   })
 
@@ -41,11 +43,17 @@ function QuotationEdit() {
     try {
       const [quotationRes, productsRes, settingsRes] = await Promise.all([
         quotationsApi.getById(id),
-        productsApi.getAll(),
+        productsApi.getAll({ minimal: 'true' }), // Load minimal products for faster loading
         settingsApi.getAll()
       ])
       
       const quotation = quotationRes.data
+      
+      // Handle both array and paginated response for products
+      const productsData = Array.isArray(productsRes.data) 
+        ? productsRes.data 
+        : (productsRes.data?.data || [])
+      
       setFormData({
         quotation_number: quotation.quotation_number,
         customer_name: quotation.customer_name || '',
@@ -55,16 +63,20 @@ function QuotationEdit() {
         date: quotation.date || new Date().toISOString().split('T')[0],
         notes: quotation.notes || '',
         status: quotation.status || 'draft',
+        currency: quotation.currency || settingsRes.data.currency || 'AED',
+        vat_rate: quotation.vat_rate || settingsRes.data.vat_rate || 5,
         items: (quotation.items || []).map(item => ({
           ...item,
           name: item.description?.split('\n')[0]?.substring(0, 50) || 'Item'
         }))
       })
-      setProducts(productsRes.data)
-      setSettings(settingsRes.data)
+      // Ensure products is always an array
+      setProducts(Array.isArray(productsData) ? productsData : [])
+      setSettings(settingsRes.data || {})
     } catch (error) {
       console.error('Error loading quotation:', error)
-      alert('Failed to load quotation')
+      console.error('Error details:', error.response?.data || error.message)
+      alert('Failed to load quotation. Please try again.')
       navigate('/quotations')
     } finally {
       setLoading(false)
@@ -73,7 +85,13 @@ function QuotationEdit() {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target
-    setFormData(prev => ({ ...prev, [name]: value }))
+    // For VAT rate, ensure it's a valid number
+    if (name === 'vat_rate') {
+      const numValue = value === '' ? '' : parseFloat(value)
+      setFormData(prev => ({ ...prev, [name]: isNaN(numValue) ? '' : numValue }))
+    } else {
+      setFormData(prev => ({ ...prev, [name]: value }))
+    }
   }
 
   const addProductItem = () => {
@@ -99,18 +117,37 @@ function QuotationEdit() {
     }))
   }
 
+  const getProductImage = (product) => {
+    if (!product.images || !product.id) return ''
+    try {
+      const images = typeof product.images === 'string' ? JSON.parse(product.images) : product.images
+      if (!Array.isArray(images) || images.length === 0) return ''
+      
+      // Use backend proxy endpoint to fetch from FTP
+      return `/api/images/product/${product.id}`
+    } catch {
+      return ''
+    }
+  }
+
   const selectProduct = (product) => {
     setFormData(prev => {
       const newItems = [...prev.items]
+      const imageUrl = getProductImage(product)
       const newItem = {
         product_id: product.id,
-        ref_no: product.ref_no,
-        name: product.name,
-        description: product.description || product.name,
-        model_no: product.model_no || '',
-        image_path: product.image_path || '',
+        ref_no: product.slug || '',
+        name: product.name_en || product.name_ar || '',
+        description: product.description_en || product.description_ar || product.name_en || product.name_ar || '',
+        model_no: product.model || '',
+        image_path: imageUrl,
         qty: 1,
-        unit_price: parseFloat(product.unit_price) || 0
+        unit_price: parseFloat(product.price) || 0,
+        brand_name_en: product.brand_name_en || '',
+        brand_name_ar: product.brand_name_ar || '',
+        brand_country_en: product.brand_country_en || '',
+        brand_country_ar: product.brand_country_ar || '',
+        brand_flag_image: product.brand_flag_image || ''
       }
       
       if (currentItemIndex !== null && currentItemIndex < newItems.length) {
@@ -159,7 +196,11 @@ function QuotationEdit() {
   }
 
   const calculateTotals = () => {
-    const vatRate = parseFloat(settings.vat_rate || 5) / 100
+    // Get VAT rate from formData, fallback to settings, default to 5
+    const vatRateValue = formData.vat_rate !== undefined && formData.vat_rate !== '' 
+      ? parseFloat(formData.vat_rate) 
+      : parseFloat(settings.vat_rate || 5)
+    const vatRate = vatRateValue / 100
     const total = formData.items.reduce((sum, item) => {
       return sum + ((parseFloat(item.qty) || 0) * (parseFloat(item.unit_price) || 0))
     }, 0)
@@ -193,18 +234,30 @@ function QuotationEdit() {
     }
   }
 
-  const formatCurrency = (amount) => {
-    return `AED ${parseFloat(amount || 0).toLocaleString('en-US', { 
+  const formatCurrency = (amount, currency = formData.currency || settings.currency || 'AED') => {
+    const currencySymbols = {
+      'USD': '$',
+      'AED': 'AED',
+      'GBP': '£',
+      'EUR': '€',
+      'SAR': 'SAR'
+    }
+    const symbol = currencySymbols[currency] || currency
+    return `${symbol} ${parseFloat(amount || 0).toLocaleString('en-US', { 
       minimumFractionDigits: 2, 
       maximumFractionDigits: 2 
     })}`
   }
 
-  const filteredProducts = products.filter(p => 
-    p.name.toLowerCase().includes(productSearch.toLowerCase()) ||
-    p.ref_no.toLowerCase().includes(productSearch.toLowerCase()) ||
-    (p.model_no && p.model_no.toLowerCase().includes(productSearch.toLowerCase()))
-  )
+  const filteredProducts = Array.isArray(products) ? products.filter(p => {
+    const searchLower = productSearch.toLowerCase()
+    return (
+      (p.name_en && p.name_en.toLowerCase().includes(searchLower)) ||
+      (p.name_ar && p.name_ar.toLowerCase().includes(searchLower)) ||
+      (p.slug && p.slug.toLowerCase().includes(searchLower)) ||
+      (p.model && p.model.toLowerCase().includes(searchLower))
+    )
+  }) : []
 
   const { total, vat, grandTotal } = calculateTotals()
 
@@ -295,6 +348,36 @@ function QuotationEdit() {
                 onChange={handleInputChange}
                 className="input-field"
               />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Currency</label>
+              <select
+                name="currency"
+                value={formData.currency}
+                onChange={handleInputChange}
+                className="input-field"
+              >
+                <option value="AED">AED - UAE Dirham</option>
+                <option value="USD">USD - US Dollar</option>
+                <option value="SAR">SAR - Saudi Riyal</option>
+                <option value="GBP">GBP - British Pound</option>
+                <option value="EUR">EUR - Euro</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">VAT Rate (%)</label>
+              <input
+                type="number"
+                name="vat_rate"
+                value={formData.vat_rate}
+                onChange={handleInputChange}
+                min="0"
+                max="100"
+                step="0.01"
+                className="input-field"
+                placeholder="Enter VAT rate (e.g., 0, 5, 10)"
+              />
+              <p className="text-xs text-gray-500 mt-1">Common: 0% or 5%</p>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
@@ -407,7 +490,7 @@ function QuotationEdit() {
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Unit Price (AED)</label>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Unit Price ({formData.currency || settings.currency || 'AED'})</label>
                         <input
                           type="number"
                           min="0"
@@ -450,7 +533,7 @@ function QuotationEdit() {
                     <span className="font-semibold text-gray-800">{formatCurrency(total)}</span>
                   </div>
                   <div className="flex justify-between text-gray-600">
-                    <span>VAT ({settings.vat_rate || 5}%):</span>
+                    <span>VAT ({formData.vat_rate !== undefined && formData.vat_rate !== '' ? formData.vat_rate : (settings.vat_rate || 5)}%):</span>
                     <span className="font-semibold text-gray-800">{formatCurrency(vat)}</span>
                   </div>
                 </div>
@@ -572,14 +655,14 @@ function QuotationEdit() {
                           className="w-full p-4 text-left hover:bg-primary-50 transition-colors flex items-center gap-4 group"
                         >
                           <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-gray-800 group-hover:text-primary-700">{product.name}</p>
-                            <p className="text-sm text-gray-500 mt-0.5 line-clamp-2">{product.description}</p>
-                            {product.model_no && (
-                              <p className="text-xs text-gray-400 mt-1">Model: {product.model_no}</p>
+                            <p className="font-semibold text-gray-800 group-hover:text-primary-700">{product.name_en || product.name_ar || 'Product'}</p>
+                            <p className="text-sm text-gray-500 mt-0.5 line-clamp-2">{product.description_en || product.description_ar || ''}</p>
+                            {product.model && (
+                              <p className="text-xs text-gray-400 mt-1">Model: {product.model}</p>
                             )}
                           </div>
                           <div className="text-right flex-shrink-0">
-                            <p className="font-bold text-primary-600">{formatCurrency(product.unit_price)}</p>
+                            <p className="font-bold text-primary-600">{formatCurrency(product.price || 0)}</p>
                           </div>
                           <ChevronRight size={18} className="text-gray-300 group-hover:text-primary-500" />
                         </button>

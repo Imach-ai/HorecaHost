@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { brandsApi, categoriesApi, subcategoriesApi } from '../api';
-import { Plus, Edit, Trash2, X, Save, Tag, FolderTree, Layers } from 'lucide-react';
+import { Plus, Edit, Trash2, X, Save, Tag, FolderTree, Layers, Search } from 'lucide-react';
+import { useDebounce } from '../hooks/useDebounce';
 
 export default function ManagePage() {
   const [activeTab, setActiveTab] = useState('brands');
@@ -12,6 +13,8 @@ export default function ManagePage() {
   const [formData, setFormData] = useState({ name_en: '', name_ar: '', slug: '', active: true });
   const [showForm, setShowForm] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearch = useDebounce(searchQuery, 300);
 
   // Load data
   useEffect(() => {
@@ -119,6 +122,15 @@ export default function ManagePage() {
   ];
 
   const currentData = activeTab === 'brands' ? brands : activeTab === 'categories' ? categories : subcategories;
+  
+  // Filter data based on search query
+  const filteredData = debouncedSearch
+    ? currentData.filter(item => 
+        (item.name_en && item.name_en.toLowerCase().includes(debouncedSearch.toLowerCase())) ||
+        (item.name_ar && item.name_ar.toLowerCase().includes(debouncedSearch.toLowerCase())) ||
+        (item.slug && item.slug.toLowerCase().includes(debouncedSearch.toLowerCase()))
+      )
+    : currentData;
 
   return (
     <div className="space-y-6">
@@ -159,24 +171,46 @@ export default function ManagePage() {
         </nav>
       </div>
 
-      {/* Category Filter for Subcategories */}
-      {activeTab === 'subcategories' && (
-        <div className="flex items-center gap-4">
-          <label className="text-sm font-medium text-gray-700">Filter by Category:</label>
-          <select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          >
-            <option value="">All Categories</option>
-            {categories.map((cat) => (
-              <option key={cat.id} value={cat.id}>
-                {cat.name_en}
-              </option>
-            ))}
-          </select>
+      {/* Search and Filters */}
+      <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex-1 min-w-[200px]">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by name or slug..."
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                <X size={18} />
+              </button>
+            )}
+          </div>
         </div>
-      )}
+        {activeTab === 'subcategories' && (
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium text-gray-700">Filter by Category:</label>
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="">All Categories</option>
+              {categories.map((cat) => (
+                <option key={cat.id} value={cat.id}>
+                  {cat.name_en}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
 
       {/* Form Modal */}
       {showForm && (
@@ -273,8 +307,10 @@ export default function ManagePage() {
       <div className="bg-white rounded-lg shadow overflow-hidden">
         {loading ? (
           <div className="p-8 text-center text-gray-500">Loading...</div>
-        ) : currentData.length === 0 ? (
-          <div className="p-8 text-center text-gray-500">No items found</div>
+        ) : filteredData.length === 0 ? (
+          <div className="p-8 text-center text-gray-500">
+            {searchQuery ? 'No items found matching your search' : 'No items found'}
+          </div>
         ) : (
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
@@ -291,7 +327,7 @@ export default function ManagePage() {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {currentData.map((item) => (
+              {filteredData.map((item) => (
                 <tr key={item.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{item.id}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{item.name_en}</td>

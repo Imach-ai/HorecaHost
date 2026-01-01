@@ -57,12 +57,15 @@ router.get('/', async (req, res) => {
     const pageNum = page ? Math.max(1, parseInt(page) || 1) : 1;
     const limitNum = limit ? Math.min(Math.max(1, parseInt(limit) || 50), 100) : 50;
     
-    // Select minimal fields for quotation page (faster)
+    // Select minimal fields for quotation page (faster) - but include description and brand
     const selectFields = minimal === 'true' 
-      ? `p.id, p.name_en, p.name_ar, p.model, p.slug, p.price, p.images`
+      ? `p.id, p.name_en, p.name_ar, p.model, p.slug, p.price, p.images, p.description_en, p.description_ar, b.name_en as brand_name_en, b.name_ar as brand_name_ar, b.country_en as brand_country_en, b.country_ar as brand_country_ar, b.flag_image as brand_flag_image`
       : `p.*,
         b.name_en as brand_name_en,
         b.name_ar as brand_name_ar,
+        b.country_en as brand_country_en,
+        b.country_ar as brand_country_ar,
+        b.flag_image as brand_flag_image,
         c.name_en as category_name_en,
         c.name_ar as category_name_ar,
         s.name_en as subcategory_name_en,
@@ -146,6 +149,9 @@ router.get('/:id', async (req, res) => {
         p.*,
         b.name_en as brand_name_en,
         b.name_ar as brand_name_ar,
+        b.country_en as brand_country_en,
+        b.country_ar as brand_country_ar,
+        b.flag_image as brand_flag_image,
         c.name_en as category_name_en,
         c.name_ar as category_name_ar,
         s.name_en as subcategory_name_en,

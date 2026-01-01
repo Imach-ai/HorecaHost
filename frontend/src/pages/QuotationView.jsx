@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Edit, FileDown, Package, Calendar, User, Phone, Mail, MapPin } from 'lucide-react'
 import { quotationsApi, settingsApi } from '../api'
+import { getFlagImageUrl } from '../utils/flagUtils'
 
 function QuotationView() {
   const { id } = useParams()
@@ -190,7 +191,25 @@ function QuotationView() {
                   <tr key={item.id || index} className="border-b border-gray-100 hover:bg-blue-50/30 transition-colors">
                     <td className="py-4 px-4 text-center text-gray-500 font-medium">{item.line_number || index + 1}</td>
                     <td className="py-4 px-4">
-                      <div className="text-gray-800 leading-relaxed whitespace-pre-wrap text-sm max-w-lg">{item.description || '-'}</div>
+                      <div className="text-gray-800 leading-relaxed whitespace-pre-wrap text-sm max-w-lg">
+                        {item.description || '-'}
+                        {item.brand_name_en && (
+                          <span className="inline-flex items-center gap-1 ml-2 text-[10px] font-semibold bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded align-middle">
+                            {(() => {
+                              const flagUrl = getFlagImageUrl(item.brand_country_en, item.brand_flag_image);
+                              return flagUrl ? (
+                                <img 
+                                  src={flagUrl} 
+                                  alt={item.brand_country_en || ''}
+                                  className="w-3 h-3 object-cover rounded-sm"
+                                  onError={(e) => { e.target.style.display = 'none' }}
+                                />
+                              ) : null;
+                            })()}
+                            {item.brand_name_en}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="py-4 px-4 text-center">
                       {item.model_no ? (
@@ -218,7 +237,25 @@ function QuotationView() {
                     <span className="font-mono text-xs bg-gray-200 px-2 py-0.5 rounded">{item.model_no}</span>
                   )}
                 </div>
-                <p className="text-gray-800 text-sm leading-relaxed mb-3">{item.description || '-'}</p>
+                <p className="text-gray-800 text-sm leading-relaxed mb-3">
+                  {item.description || '-'}
+                  {item.brand_name_en && (
+                    <span className="inline-flex items-center gap-1 ml-2 text-[10px] font-semibold bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded">
+                      {(() => {
+                        const flagUrl = getFlagImageUrl(item.brand_country_en, item.brand_flag_image);
+                        return flagUrl ? (
+                          <img 
+                            src={flagUrl} 
+                            alt={item.brand_country_en || ''}
+                            className="w-3 h-3 object-cover rounded-sm"
+                            onError={(e) => { e.target.style.display = 'none' }}
+                          />
+                        ) : null;
+                      })()}
+                      {item.brand_name_en}
+                    </span>
+                  )}
+                </p>
                 <div className="flex justify-between items-center pt-2 border-t border-gray-200">
                   <div className="text-sm text-gray-500">
                     {item.qty} × {formatCurrency(item.unit_price)}

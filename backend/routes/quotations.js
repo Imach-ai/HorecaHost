@@ -119,9 +119,18 @@ router.get('/:id', async (req, res) => {
     }
 
     const itemsStmt = await db.prepare(`
-      SELECT * FROM quotation_items 
-      WHERE quotation_id = ?
-      ORDER BY line_number
+      SELECT 
+        qi.*,
+        b.name_en as brand_name_en,
+        b.name_ar as brand_name_ar,
+        b.country_en as brand_country_en,
+        b.country_ar as brand_country_ar,
+        b.flag_image as brand_flag_image
+      FROM quotation_items qi
+      LEFT JOIN products p ON qi.product_id = p.id
+      LEFT JOIN brands b ON p.brand_id = b.id
+      WHERE qi.quotation_id = ?
+      ORDER BY qi.line_number
     `);
     const items = await itemsStmt.all(req.params.id);
 
@@ -143,6 +152,8 @@ router.post('/', async (req, res) => {
       date, 
       notes,
       status,
+      currency,
+      vat_rate,
       items 
     } = req.body;
 
@@ -159,17 +170,24 @@ router.post('/', async (req, res) => {
       total += lineTotal;
     }
 
-    // Get VAT rate from settings
-    const vatStmt = await db.prepare('SELECT value FROM settings WHERE key = ?');
-    const vatRateSetting = await vatStmt.get('vat_rate');
-    const vatRate = parseFloat(vatRateSetting?.value || 5) / 100;
+    // Get VAT rate from request or settings
+    let vatRateValue;
+    if (vat_rate !== undefined) {
+      vatRateValue = parseFloat(vat_rate);
+    } else {
+      const vatStmt = await db.prepare('SELECT value FROM settings WHERE key = ?');
+      const vatRateSetting = await vatStmt.get('vat_rate');
+      vatRateValue = parseFloat(vatRateSetting?.value || 5);
+    }
+    const vatRate = vatRateValue / 100;
     const vat = total * vatRate;
     const grand_total = total + vat;
+    const quotationCurrency = currency || 'AED';
 
     // Insert quotation
     const insertStmt = await db.prepare(`
-      INSERT INTO quotations (quotation_number, customer_name, customer_address, customer_phone, customer_email, date, total, vat, grand_total, notes, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO quotations (quotation_number, customer_name, customer_address, customer_phone, customer_email, date, total, vat, grand_total, notes, status, currency, vat_rate)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       RETURNING id
     `);
     const result = await insertStmt.run(
@@ -183,7 +201,9 @@ router.post('/', async (req, res) => {
       vat,
       grand_total,
       notes || '',
-      status || 'draft'
+      status || 'draft',
+      quotationCurrency,
+      vatRateValue
     );
 
     const quotationId = result.insertId || result.lastInsertRowid;
@@ -245,7 +265,20 @@ router.post('/', async (req, res) => {
 
     const quotationStmt = await db.prepare('SELECT * FROM quotations WHERE id = ?');
     const quotation = await quotationStmt.get(quotationId);
-    const itemsStmt = await db.prepare('SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY line_number');
+    const itemsStmt = await db.prepare(`
+      SELECT 
+        qi.*,
+        b.name_en as brand_name_en,
+        b.name_ar as brand_name_ar,
+        b.country_en as brand_country_en,
+        b.country_ar as brand_country_ar,
+        b.flag_image as brand_flag_image
+      FROM quotation_items qi
+      LEFT JOIN products p ON qi.product_id = p.id
+      LEFT JOIN brands b ON p.brand_id = b.id
+      WHERE qi.quotation_id = ?
+      ORDER BY qi.line_number
+    `);
     const savedItems = await itemsStmt.all(quotationId);
 
     res.status(201).json({ ...quotation, items: savedItems });
@@ -267,6 +300,8 @@ router.put('/:id', async (req, res) => {
       date, 
       notes,
       status,
+      currency,
+      vat_rate,
       items 
     } = req.body;
 
@@ -283,18 +318,28 @@ router.put('/:id', async (req, res) => {
       total += lineTotal;
     }
 
-    const vatStmt = await db.prepare('SELECT value FROM settings WHERE key = ?');
-    const vatRateSetting = await vatStmt.get('vat_rate');
-    const vatRate = parseFloat(vatRateSetting?.value || 5) / 100;
+    // Get VAT rate from request or existing or settings
+    let vatRateValue;
+    if (vat_rate !== undefined) {
+      vatRateValue = parseFloat(vat_rate);
+    } else if (existing.vat_rate) {
+      vatRateValue = parseFloat(existing.vat_rate);
+    } else {
+      const vatStmt = await db.prepare('SELECT value FROM settings WHERE key = ?');
+      const vatRateSetting = await vatStmt.get('vat_rate');
+      vatRateValue = parseFloat(vatRateSetting?.value || 5);
+    }
+    const vatRate = vatRateValue / 100;
     const vat = total * vatRate;
     const grand_total = total + vat;
+    const quotationCurrency = currency || existing.currency || 'AED';
 
     // Update quotation
     const updateStmt = await db.prepare(`
       UPDATE quotations 
       SET customer_name = ?, customer_address = ?, customer_phone = ?, customer_email = ?,
           date = ?, total = ?, vat = ?, grand_total = ?, notes = ?, status = ?,
-          updated_at = CURRENT_TIMESTAMP
+          currency = ?, vat_rate = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `);
     await updateStmt.run(
@@ -308,6 +353,8 @@ router.put('/:id', async (req, res) => {
       grand_total,
       notes || '',
       status || existing.status,
+      quotationCurrency,
+      vatRateValue,
       id
     );
 
@@ -373,7 +420,20 @@ router.put('/:id', async (req, res) => {
 
     const quotationStmt = await db.prepare('SELECT * FROM quotations WHERE id = ?');
     const quotation = await quotationStmt.get(id);
-    const itemsStmt = await db.prepare('SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY line_number');
+    const itemsStmt = await db.prepare(`
+      SELECT 
+        qi.*,
+        b.name_en as brand_name_en,
+        b.name_ar as brand_name_ar,
+        b.country_en as brand_country_en,
+        b.country_ar as brand_country_ar,
+        b.flag_image as brand_flag_image
+      FROM quotation_items qi
+      LEFT JOIN products p ON qi.product_id = p.id
+      LEFT JOIN brands b ON p.brand_id = b.id
+      WHERE qi.quotation_id = ?
+      ORDER BY qi.line_number
+    `);
     const savedItems = await itemsStmt.all(id);
 
     res.json({ ...quotation, items: savedItems });
@@ -413,9 +473,18 @@ router.get('/:id/pdf', async (req, res) => {
     }
 
     const itemsStmt = await db.prepare(`
-      SELECT * FROM quotation_items 
-      WHERE quotation_id = ?
-      ORDER BY line_number
+      SELECT 
+        qi.*,
+        b.name_en as brand_name_en,
+        b.name_ar as brand_name_ar,
+        b.country_en as brand_country_en,
+        b.country_ar as brand_country_ar,
+        b.flag_image as brand_flag_image
+      FROM quotation_items qi
+      LEFT JOIN products p ON qi.product_id = p.id
+      LEFT JOIN brands b ON p.brand_id = b.id
+      WHERE qi.quotation_id = ?
+      ORDER BY qi.line_number
     `);
     const items = await itemsStmt.all(req.params.id);
 
@@ -434,7 +503,12 @@ router.get('/:id/pdf', async (req, res) => {
     res.send(pdfBuffer);
   } catch (error) {
     console.error('Error generating PDF:', error);
-    res.status(500).json({ error: 'Failed to generate PDF' });
+    console.error('Error details:', error.message);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Failed to generate PDF',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
