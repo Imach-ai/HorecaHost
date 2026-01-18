@@ -31,6 +31,8 @@ function QuotationNew() {
     customer_email: '',
     date: new Date().toISOString().split('T')[0],
     notes: '',
+    delivery: '',
+    payment: '',
     status: 'draft',
     currency: 'AED',
     vat_rate: 5,
@@ -564,17 +566,45 @@ function QuotationNew() {
           )}
         </div>
 
-        {/* Notes */}
-        <div className="card p-5">
-          <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wide mb-3">Notes (Optional)</h2>
-          <textarea
-            name="notes"
-            value={formData.notes}
-            onChange={handleInputChange}
-            rows={2}
-            className="input-field resize-none text-sm"
-            placeholder="Additional notes..."
-          />
+        {/* Notes, Delivery & Payment */}
+        <div className="card p-5 space-y-4">
+          <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wide mb-3">Additional Information</h2>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Notes (Optional)</label>
+            <textarea
+              name="notes"
+              value={formData.notes}
+              onChange={handleInputChange}
+              rows={2}
+              className="input-field resize-none text-sm"
+              placeholder="Additional notes..."
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Delivery</label>
+            <textarea
+              name="delivery"
+              value={formData.delivery}
+              onChange={handleInputChange}
+              rows={3}
+              className="input-field resize-y text-sm"
+              placeholder="Enter delivery terms and conditions..."
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Payment</label>
+            <textarea
+              name="payment"
+              value={formData.payment}
+              onChange={handleInputChange}
+              rows={3}
+              className="input-field resize-y text-sm"
+              placeholder="Enter payment terms and conditions..."
+            />
+          </div>
         </div>
 
         {/* Actions */}

@@ -151,6 +151,8 @@ router.post('/', async (req, res) => {
       customer_email,
       date, 
       notes,
+      delivery,
+      payment,
       status,
       currency,
       vat_rate,
@@ -186,8 +188,8 @@ router.post('/', async (req, res) => {
 
     // Insert quotation
     const insertStmt = await db.prepare(`
-      INSERT INTO quotations (quotation_number, customer_name, customer_address, customer_phone, customer_email, date, total, vat, grand_total, notes, status, currency, vat_rate)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO quotations (quotation_number, customer_name, customer_address, customer_phone, customer_email, date, total, vat, grand_total, notes, delivery, payment, status, currency, vat_rate)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       RETURNING id
     `);
     const result = await insertStmt.run(
@@ -201,6 +203,8 @@ router.post('/', async (req, res) => {
       vat,
       grand_total,
       notes || '',
+      delivery || '',
+      payment || '',
       status || 'draft',
       quotationCurrency,
       vatRateValue
@@ -299,6 +303,8 @@ router.put('/:id', async (req, res) => {
       customer_email,
       date, 
       notes,
+      delivery,
+      payment,
       status,
       currency,
       vat_rate,
@@ -338,8 +344,8 @@ router.put('/:id', async (req, res) => {
     const updateStmt = await db.prepare(`
       UPDATE quotations 
       SET customer_name = ?, customer_address = ?, customer_phone = ?, customer_email = ?,
-          date = ?, total = ?, vat = ?, grand_total = ?, notes = ?, status = ?,
-          currency = ?, vat_rate = ?, updated_at = CURRENT_TIMESTAMP
+          date = ?, total = ?, vat = ?, grand_total = ?, notes = ?, delivery = ?, payment = ?,
+          status = ?, currency = ?, vat_rate = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `);
     await updateStmt.run(
@@ -352,6 +358,8 @@ router.put('/:id', async (req, res) => {
       vat,
       grand_total,
       notes || '',
+      delivery || '',
+      payment || '',
       status || existing.status,
       quotationCurrency,
       vatRateValue,
@@ -487,6 +495,11 @@ router.get('/:id/pdf', async (req, res) => {
       ORDER BY qi.line_number
     `);
     const items = await itemsStmt.all(req.params.id);
+    
+    console.log('PDF Route: Fetched', items ? items.length : 0, 'items for quotation', req.params.id);
+    if (items && items.length > 0) {
+      console.log('PDF Route: First item:', JSON.stringify(items[0], null, 2).substring(0, 300));
+    }
 
     // Get settings
     const settingsStmt = await db.prepare('SELECT key, value FROM settings');
@@ -496,15 +509,21 @@ router.get('/:id/pdf', async (req, res) => {
       settings[row.key] = row.value;
     }
 
-    const pdfBuffer = await generateQuotationPDF({ ...quotation, items }, settings);
+    const quotationWithItems = { ...quotation, items };
+    console.log('PDF Route: Passing quotation with', quotationWithItems.items ? quotationWithItems.items.length : 0, 'items to PDF generator');
+    
+    const pdfBuffer = await generateQuotationPDF(quotationWithItems, settings);
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="Quotation-${quotation.quotation_number}.pdf"`);
     res.send(pdfBuffer);
   } catch (error) {
-    console.error('Error generating PDF:', error);
-    console.error('Error details:', error.message);
-    console.error('Error stack:', error.stack);
+    console.error('❌ Error generating PDF:', error);
+    console.error('❌ Error message:', error.message);
+    console.error('❌ Error stack:', error.stack);
+    if (error.message) {
+      console.error('❌ Detailed error:', JSON.stringify(error.message));
+    }
     res.status(500).json({ 
       error: 'Failed to generate PDF',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined

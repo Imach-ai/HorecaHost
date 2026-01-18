@@ -4,6 +4,51 @@ const fs = require('fs');
 const https = require('https');
 const http = require('http');
 
+// Helper function to get image from database via API endpoint
+async function getImageFromApiEndpoint(apiPath) {
+  try {
+    // Extract product ID from path like /api/images/product/123
+    const match = apiPath.match(/\/api\/images\/product\/(\d+)/);
+    if (!match) return null;
+    
+    const productId = match[1];
+    
+    // Get database connection
+    const { getDb } = require('../database');
+    const db = getDb();
+    if (!db) return null;
+    
+    // Fetch image from database
+    const stmt = await db.prepare('SELECT image_data, image_mime_type FROM products WHERE id = ?');
+    const product = await stmt.get(productId);
+    
+    if (product && product.image_data) {
+      const mimeType = product.image_mime_type || 'image/png';
+      const imageType = mimeType.split('/')[1] || 'png';
+      
+      // Handle Buffer (PostgreSQL BYTEA) or already base64 string
+      let base64;
+      if (Buffer.isBuffer(product.image_data)) {
+        base64 = product.image_data.toString('base64');
+      } else if (typeof product.image_data === 'string') {
+        // If it's already base64, use it directly
+        base64 = product.image_data;
+      } else {
+        // Try to convert to Buffer first
+        const buffer = Buffer.from(product.image_data);
+        base64 = buffer.toString('base64');
+      }
+      
+      return `data:image/${imageType};base64,${base64}`;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error fetching image from database:', error.message);
+    return null;
+  }
+}
+
 // Define fonts - use built-in pdfmake fonts
 let fonts = {};
 
@@ -215,101 +260,119 @@ async function generateQuotationPDF(quotation, settings) {
       {
         width: '*',
         stack: [
-          { text: settings.company_name || 'Horeca Host', style: 'companyName' },
-          { text: settings.company_address || 'Dubai, U.A.E', style: 'companyInfo', margin: [0, 4, 0, 0] },
-          { text: 'Tel: ' + (settings.company_phone || '') + (settings.company_mobile ? ' | Mobile: ' + settings.company_mobile : ''), style: 'companyInfo' },
-          { text: 'Email: ' + (settings.company_email || ''), style: 'companyInfo' },
-          { text: (settings.company_website ? 'Web: ' + settings.company_website : ''), style: 'companyInfo' },
-          { text: settings.company_trn || '', style: 'companyInfo', margin: [0, 4, 0, 0] }
+          { text: settings.company_name || 'Horeca Host', style: 'companyName', lineHeight: 1.1 },
+          { text: settings.company_address || 'Dubai, U.A.E', style: 'companyInfo', margin: [0, 1, 0, 0], lineHeight: 1.1 },
+          { text: (settings.company_phone ? 'Tel: ' + settings.company_phone : ''), style: 'companyInfo', margin: [0, 0.5, 0, 0], lineHeight: 1.1 },
+          { text: (settings.company_email ? 'Email: ' + settings.company_email : ''), style: 'companyInfo', margin: [0, 0.5, 0, 0], lineHeight: 1.1 }
         ]
       },
       {
         width: 'auto',
         stack: [
-          { text: 'QUOTATION', style: 'quotationTitle', alignment: 'right' },
-          { text: quotation.quotation_number || '', style: 'quotationNumber', alignment: 'right', margin: [0, 4, 0, 0] },
-          { text: 'Date: ' + formatDate(quotation.date), style: 'quotationDate', alignment: 'right', margin: [0, 8, 0, 0] }
+          { text: 'QUOTATION', style: 'quotationTitle', alignment: 'right', lineHeight: 1.1 },
+          { text: quotation.quotation_number || '', style: 'quotationNumber', alignment: 'right', margin: [0, 1, 0, 0], lineHeight: 1.1 },
+          { text: 'Date: ' + formatDate(quotation.date), style: 'quotationDate', alignment: 'right', margin: [0, 2, 0, 0], lineHeight: 1.1 }
         ]
       }
     ],
-    margin: [0, 0, 0, 20]
+    margin: [0, 0, 0, 5]
   });
 
-  // Customer info box
+  // Customer info box - Use simple stack with border instead of nested table
   const customerStack = [
-    { text: 'BILL TO:', style: 'sectionLabel', margin: [0, 0, 0, 6] },
-    { text: quotation.customer_name || '', style: 'customerName' }
+    { text: 'Bill To', style: 'sectionLabel', margin: [0, 0, 0, 2] },
+    { text: quotation.customer_name || '', style: 'customerName', margin: [0, 0.5, 0, 0] }
   ];
   
   if (quotation.customer_address) {
-    customerStack.push({ text: quotation.customer_address, style: 'customerInfo' });
+    customerStack.push({ text: quotation.customer_address, style: 'customerInfo', margin: [0, 0.5, 0, 0] });
   }
   if (quotation.customer_phone) {
-    customerStack.push({ text: 'Tel: ' + quotation.customer_phone, style: 'customerInfo' });
+    customerStack.push({ text: quotation.customer_phone, style: 'customerInfo', margin: [0, 0.5, 0, 0] });
   }
   if (quotation.customer_email) {
-    customerStack.push({ text: 'Email: ' + quotation.customer_email, style: 'customerInfo' });
+    customerStack.push({ text: quotation.customer_email, style: 'customerInfo', margin: [0, 0.5, 0, 0] });
   }
 
+  // Use simple stack with border instead of nested table to avoid layout issues
   headerContent.push({
-    table: {
-      widths: ['*'],
-      body: [[{
-        stack: customerStack,
-        margin: [12, 12, 12, 12],
-        fillColor: '#f8fafc'
-      }]]
-    },
-    layout: {
-      hLineWidth: function() { return 1; },
-      vLineWidth: function() { return 1; },
-      hLineColor: function() { return '#e2e8f0'; },
-      vLineColor: function() { return '#e2e8f0'; }
-    },
-    margin: [0, 0, 0, 20]
+    stack: customerStack,
+    border: [true, true, true, true],
+    borderColor: '#e2e8f0',
+    fillColor: '#f8fafc',
+    margin: [0, 0, 0, 5]
   });
 
-  // Build items table - Column order: NO. | MODEL NO. | ITEM DESCRIPTION | IMAGE | QTY | UNIT PRICE | TOTAL
+  // Build items table - Column order: No. | Item Description | Image | Model No. | Qty | Unit Price | Total
   const itemsTableBody = [
     [
-      { text: 'NO.', style: 'tableHeader', alignment: 'center' },
-      { text: 'MODEL NO.', style: 'tableHeader', alignment: 'center' },
-      { text: 'ITEM DESCRIPTION', style: 'tableHeader', alignment: 'left' },
-      { text: 'IMAGE', style: 'tableHeader', alignment: 'center' },
-      { text: 'QTY', style: 'tableHeader', alignment: 'center' },
-      { text: 'UNIT PRICE', style: 'tableHeader', alignment: 'right' },
-      { text: 'TOTAL', style: 'tableHeader', alignment: 'right' }
+      { text: 'No.', style: 'tableHeader', alignment: 'center' },
+      { text: 'Item Description', style: 'tableHeader', alignment: 'left' },
+      { text: 'Image', style: 'tableHeader', alignment: 'center' },
+      { text: 'Model No.', style: 'tableHeader', alignment: 'center' },
+      { text: 'Qty', style: 'tableHeader', alignment: 'center' },
+      { text: 'Unit Price', style: 'tableHeader', alignment: 'right' },
+      { text: 'Total', style: 'tableHeader', alignment: 'right' }
     ]
   ];
 
   const items = quotation.items || [];
+  console.log('PDF DEBUG: quotation.items =', items ? items.length : 0, 'items');
+  console.log('PDF DEBUG: quotation object keys =', Object.keys(quotation));
+  
   const flagImagePromises = [];
+  const productImagePromises = [];
+  
+  if (items.length === 0) {
+    console.error('ERROR: No items in quotation!');
+    console.error('Quotation data:', JSON.stringify(quotation, null, 2).substring(0, 500));
+  }
   
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     const lineNumber = item.line_number || (i + 1);
     const lineTotal = (parseFloat(item.qty) || 0) * (parseFloat(item.unit_price) || 0);
     
-    // Try to get image
-    let imageCell = { text: '-', alignment: 'center', margin: [0, 8, 0, 8], color: '#94a3b8' };
+    // Try to get product image - handle both local files and HTTP/HTTPS URLs
+    let imageCell = { text: '-', alignment: 'center', color: '#94a3b8', fontSize: 8 };
     
     if (item.image_path) {
-      const imageBase64 = getImageBase64(item.image_path);
-      if (imageBase64) {
-        imageCell = { 
-          image: imageBase64, 
-          width: 45, 
-          height: 45, 
-          alignment: 'center',
-          margin: [0, 4, 0, 4]
-        };
+      // Check if it's an API endpoint, HTTP/HTTPS URL, or local file
+      if (item.image_path.startsWith('/api/images/product/')) {
+        // API endpoint - store promise for async fetching from database
+        productImagePromises.push({
+          index: i,
+          url: item.image_path
+        });
+        // Placeholder will be replaced after async fetch
+        imageCell = { text: '...', alignment: 'center', color: '#94a3b8', fontSize: 8 };
+      } else if (item.image_path.startsWith('http://') || item.image_path.startsWith('https://')) {
+        // HTTP/HTTPS URL - store promise for async fetching
+        productImagePromises.push({
+          index: i,
+          url: item.image_path
+        });
+        // Placeholder will be replaced after async fetch
+        imageCell = { text: '...', alignment: 'center', color: '#94a3b8', fontSize: 8 };
+      } else {
+        // Local file path - try to load synchronously
+        const imageBase64 = getImageBase64(item.image_path);
+        if (imageBase64) {
+          imageCell = { 
+            image: imageBase64, 
+            width: 40, 
+            height: 40, 
+            alignment: 'center',
+            fit: [40, 40]
+          };
+        }
       }
     }
     
     // Build description with brand and country flag at bottom
     const descriptionStack = [];
     
-    // Add full description (preserve line breaks)
+    // Add full description (preserve line breaks, justify text)
     if (item.description) {
       // Split by newlines and add each line
       const descLines = item.description.split('\n');
@@ -318,7 +381,9 @@ async function generateQuotationPDF(quotation, settings) {
           descriptionStack.push({ 
             text: line.trim(), 
             fontSize: 9,
-            margin: [0, idx === 0 ? 0 : 2, 0, idx === descLines.length - 1 ? 4 : 0]
+            alignment: 'left',
+            margin: [0, idx === 0 ? 0 : 1.5, 0, idx === descLines.length - 1 ? 2 : 0],
+            lineHeight: 1.2
           });
         }
       });
@@ -364,8 +429,8 @@ async function generateQuotationPDF(quotation, settings) {
           fontSize: 7,
           color: '#64748b',
           italics: true,
-          margin: [0, 4, 0, 0]
-        });
+            margin: [0, 3, 0, 0]
+          });
       }
     }
     
@@ -375,23 +440,25 @@ async function generateQuotationPDF(quotation, settings) {
     }
     
     itemsTableBody.push([
-      { text: String(lineNumber), alignment: 'center', margin: [0, 12, 0, 12] },
-      { text: item.model_no || '-', alignment: 'center', margin: [0, 12, 0, 12], fontSize: 9 },
+      { text: String(lineNumber), alignment: 'center', fontSize: 9 },
       { 
         stack: descriptionStack,
-        alignment: 'left', 
-        margin: [6, 8, 6, 8]
+        alignment: 'left'
       },
       imageCell,
-      { text: String(item.qty || 1), alignment: 'center', margin: [0, 12, 0, 12], bold: true },
-      { text: formatCurrency(item.unit_price, currency), alignment: 'right', margin: [0, 12, 6, 12], fontSize: 9 },
-      { text: formatCurrency(item.line_total || lineTotal, currency), alignment: 'right', margin: [0, 12, 6, 12], bold: true, fontSize: 9 }
+      { text: item.model_no || '-', alignment: 'center', fontSize: 9 },
+      { text: String(item.qty || 1), alignment: 'center', bold: true, fontSize: 9 },
+      { text: formatCurrency(item.unit_price, currency), alignment: 'right', fontSize: 9 },
+      { text: formatCurrency(item.line_total || lineTotal, currency), alignment: 'right', bold: true, fontSize: 9 }
     ]);
   }
 
-  // Fetch all flag images asynchronously and update description stacks
+  // Fetch all flag images and product images asynchronously
+  const flagImages = {};
+  const productImages = {};
+  
+  // Fetch flag images
   if (flagImagePromises.length > 0) {
-    const flagImages = {};
     await Promise.all(
       flagImagePromises.map(async (promise) => {
         const base64 = await fetchImageBase64(promise.url);
@@ -403,37 +470,74 @@ async function generateQuotationPDF(quotation, settings) {
         }
       })
     );
+  }
+  
+  // Fetch product images
+  if (productImagePromises.length > 0) {
+    await Promise.all(
+      productImagePromises.map(async (promise) => {
+        let imageBase64 = null;
+        
+        // Handle API endpoint URLs - fetch directly from database
+        if (promise.url.startsWith('/api/images/product/')) {
+          imageBase64 = await getImageFromApiEndpoint(promise.url);
+        } else if (promise.url.startsWith('http://') || promise.url.startsWith('https://')) {
+          // Handle HTTP/HTTPS URLs
+          imageBase64 = await fetchImageBase64(promise.url);
+        } else {
+          // Handle local file paths
+          imageBase64 = getImageBase64(promise.url);
+        }
+        
+        if (imageBase64) {
+          productImages[promise.index] = imageBase64;
+        }
+      })
+    );
+  }
+  
+  // Update description stacks with flag images and product images
+  for (let i = 0; i < itemsTableBody.length; i++) {
+    if (i === 0) continue; // Skip header row
+    const rowIndex = i - 1; // Adjust for header (items start at index 0)
     
-    // Update description stacks with flag images
-    for (let i = 0; i < itemsTableBody.length; i++) {
-      if (i === 0) continue; // Skip header row
-      const rowIndex = i - 1; // Adjust for header (items start at index 0)
-      if (flagImages[rowIndex]) {
-        const descCell = itemsTableBody[i][2]; // Description is 3rd column (index 2)
-        if (descCell && descCell.stack && Array.isArray(descCell.stack)) {
-          // Find the brand text entry and replace with image + text
-          const brandIndex = descCell.stack.findIndex(s => 
-            s.text && s.text.includes(flagImages[rowIndex].brandText)
-          );
-          if (brandIndex !== -1) {
-            descCell.stack[brandIndex] = {
-              columns: [
-                { 
-                  image: flagImages[rowIndex].image, 
-                  width: 12, 
-                  height: 8,
-                  margin: [0, 2, 3, 0]
-                },
-                { 
-                  text: flagImages[rowIndex].brandText, 
-                  fontSize: 7, 
-                  color: '#64748b',
-                  italics: true
-                }
-              ],
-              margin: [0, 4, 0, 0]
-            };
-          }
+    // Update product images
+    if (productImages[rowIndex]) {
+      itemsTableBody[i][2] = { // Image is 3rd column (index 2)
+        image: productImages[rowIndex],
+        width: 40,
+        height: 40,
+        alignment: 'center',
+        fit: [40, 40]
+      };
+    }
+    
+    // Update flag images in description
+    if (flagImages[rowIndex]) {
+      const descCell = itemsTableBody[i][1]; // Description is 2nd column (index 1)
+      if (descCell && descCell.stack && Array.isArray(descCell.stack)) {
+        // Find the brand text entry and replace with image + text
+        const brandIndex = descCell.stack.findIndex(s => 
+          s.text && s.text.includes(flagImages[rowIndex].brandText)
+        );
+        if (brandIndex !== -1) {
+          descCell.stack[brandIndex] = {
+            columns: [
+              { 
+                image: flagImages[rowIndex].image, 
+                width: 12, 
+                height: 8,
+                margin: [0, 2, 3, 0]
+              },
+              { 
+                text: flagImages[rowIndex].brandText, 
+                fontSize: 7, 
+                color: '#64748b',
+                italics: true
+              }
+            ],
+            margin: [0, 4, 0, 0]
+          };
         }
       }
     }
@@ -445,11 +549,11 @@ async function generateQuotationPDF(quotation, settings) {
       widths: ['*', 100],
       body: [
         [
-          { text: 'Subtotal:', alignment: 'right', margin: [0, 6, 12, 6], color: '#4a5568' },
+          { text: 'Subtotal:', alignment: 'right', margin: [0, 6, 12, 6], color: '#4a5568', fontSize: 10 },
           { text: formatCurrency(quotation.total, currency), alignment: 'right', margin: [0, 6, 8, 6], bold: true }
         ],
         [
-          { text: 'VAT (' + vatRate + '%):', alignment: 'right', margin: [0, 6, 12, 6], color: '#4a5568' },
+          { text: 'VAT (' + vatRate + '%):', alignment: 'right', margin: [0, 6, 12, 6], color: '#4a5568', fontSize: 10 },
           { text: formatCurrency(quotation.vat, currency), alignment: 'right', margin: [0, 6, 8, 6], bold: true }
         ],
         [
@@ -463,53 +567,45 @@ async function generateQuotationPDF(quotation, settings) {
       vLineWidth: function() { return 0; },
       hLineColor: function() { return '#e2e8f0'; }
     },
-    margin: [280, 15, 0, 25]
+    margin: [280, 8, 0, 8]
   };
 
-  // Sales Terms & Conditions Section
+  // Terms & Conditions Section
   const termsSection = [];
   
-  // Sales Terms & Conditions (Main section)
-  if (settings.sales_terms) {
-    termsSection.push(
-      { text: 'Sales Terms & Conditions:', style: 'sectionTitle', margin: [0, 20, 0, 8] },
-      { text: settings.sales_terms, style: 'termsText', margin: [0, 0, 0, 12] }
-    );
-  }
-
-  // VAT Note
-  if (settings.vat_note) {
-    termsSection.push(
-      { text: settings.vat_note, style: 'vatNote', margin: [0, 0, 0, 15] }
-    );
-  }
-
-  // Quotation Message (Professional closing message)
-  if (settings.quotation_message) {
-    termsSection.push(
-      { text: settings.quotation_message, style: 'quotationMessage', margin: [0, 0, 0, 20] }
-    );
-  }
-
-  // Additional Terms & Conditions (if exists)
+  // Terms & Conditions (Main section) - Start on new page
   if (settings.terms_conditions) {
     termsSection.push(
-      { text: 'Additional Terms & Conditions:', style: 'sectionTitle', margin: [0, 0, 0, 6] },
-      { text: settings.terms_conditions, style: 'termsText', margin: [0, 0, 0, 15] }
+      { text: 'Terms & Conditions', style: 'sectionTitle', margin: [0, 0, 0, 6], pageBreak: 'before' },
+      { text: settings.terms_conditions, style: 'termsText', margin: [0, 0, 0, 8] }
+    );
+  } else if (settings.sales_terms) {
+    // Fallback to sales_terms if terms_conditions not available
+    termsSection.push(
+      { text: 'Terms & Conditions', style: 'sectionTitle', margin: [0, 0, 0, 6], pageBreak: 'before' },
+      { text: settings.sales_terms, style: 'termsText', margin: [0, 0, 0, 8] }
     );
   }
 
-  if (settings.delivery_warranty) {
-    termsSection.push(
-      { text: 'Delivery & Warranty:', style: 'sectionTitle', margin: [0, 0, 0, 6] },
-      { text: settings.delivery_warranty, style: 'termsText', margin: [0, 0, 0, 15] }
-    );
+  // Delivery & Warranty section - combine quotation.delivery and quotation.payment
+  const deliveryWarrantyParts = [];
+  if (quotation.delivery) {
+    deliveryWarrantyParts.push('Delivery: ' + quotation.delivery);
   }
-
-  if (settings.bank_details) {
+  if (quotation.payment) {
+    deliveryWarrantyParts.push('Warranty: ' + quotation.payment);
+  }
+  
+  // If no quotation-specific delivery/payment, use settings
+  if (deliveryWarrantyParts.length === 0 && settings.delivery_warranty) {
+    deliveryWarrantyParts.push(settings.delivery_warranty);
+  }
+  
+  // If we have delivery/payment info from either source, add the section
+  if (deliveryWarrantyParts.length > 0) {
     termsSection.push(
-      { text: 'Bank Details:', style: 'sectionTitle', margin: [0, 0, 0, 6] },
-      { text: settings.bank_details, style: 'termsText', margin: [0, 0, 0, 15] }
+      { text: 'Delivery & Warranty', style: 'sectionTitle', margin: [0, 0, 0, 6] },
+      { text: deliveryWarrantyParts.join('\n'), style: 'termsText', margin: [0, 0, 0, 8] }
     );
   }
 
@@ -520,8 +616,8 @@ async function generateQuotationPDF(quotation, settings) {
       {
         width: '50%',
         stack: [
-          { text: 'For ' + (settings.company_name || 'Horeca Host'), fontSize: 10, bold: true, margin: [0, 40, 0, 8] },
-          { text: managerName, fontSize: 9, color: '#64748b', margin: [0, 0, 0, 35] },
+          { text: 'For ' + (settings.company_name || 'Horeca Host'), fontSize: 10, bold: true, margin: [0, 0, 0, 6] },
+          { text: managerName, fontSize: 9, color: '#64748b', margin: [0, 0, 0, 20] },
           { text: '____________________________', fontSize: 10, color: '#cbd5e1' },
           { text: 'Authorized Signature', style: 'signatureLabel', margin: [0, 6, 0, 0] }
         ]
@@ -529,71 +625,152 @@ async function generateQuotationPDF(quotation, settings) {
       {
         width: '50%',
         stack: [
-          { text: 'Customer Acceptance', fontSize: 10, bold: true, margin: [0, 40, 0, 35] },
+          { text: 'Customer Acceptance', fontSize: 10, bold: true, margin: [0, 0, 0, 20] },
           { text: '____________________________', fontSize: 10, color: '#cbd5e1' },
           { text: 'Signature & Date', style: 'signatureLabel', margin: [0, 6, 0, 0] }
         ]
       }
     ],
-    margin: [0, 30, 0, 0]
+    margin: [0, 10, 0, 0]
   };
 
-  // Build document definition
-  // Column widths: NO(25) | MODEL(55) | DESC(*) | IMAGE(55) | QTY(30) | PRICE(60) | TOTAL(65)
+  // CRITICAL: Validate items table structure before building document
+  if (!itemsTableBody || !Array.isArray(itemsTableBody)) {
+    console.error('CRITICAL ERROR: itemsTableBody is not an array!', typeof itemsTableBody);
+    throw new Error('Invalid table structure: itemsTableBody is not an array');
+  }
+  
+  if (itemsTableBody.length < 2) {
+    console.error('CRITICAL ERROR: itemsTableBody has less than 2 rows!');
+    console.error('- Rows:', itemsTableBody.length);
+    console.error('- Items count:', items.length);
+    throw new Error(`Cannot generate PDF: quotation has no items. Table has only ${itemsTableBody.length} row(s)`);
+  }
+
+  // Validate each row has exactly 7 columns
+  const expectedColumns = 7;
+  for (let i = 0; i < itemsTableBody.length; i++) {
+    if (!Array.isArray(itemsTableBody[i])) {
+      console.error(`CRITICAL ERROR: Row ${i} is not an array!`, typeof itemsTableBody[i]);
+      throw new Error(`Invalid table row ${i}: not an array`);
+    }
+    if (itemsTableBody[i].length !== expectedColumns) {
+      console.error(`CRITICAL ERROR: Row ${i} has ${itemsTableBody[i].length} columns, expected ${expectedColumns}`);
+      console.error('Row content preview:', JSON.stringify(itemsTableBody[i]).substring(0, 200));
+      throw new Error(`Invalid table row ${i}: expected ${expectedColumns} columns, got ${itemsTableBody[i].length}`);
+    }
+  }
+
+  console.log('✅ PDF Table Validation: PASSED');
+  console.log(`   - Table has ${itemsTableBody.length} rows (1 header + ${itemsTableBody.length - 1} items)`);
+  console.log(`   - All rows have ${expectedColumns} columns`);
+
+  // Build document definition with validated table
+  // Use itemsTableBody directly - it's already validated
+  console.log('📋 Building PDF document:');
+  console.log(`   - Table rows: ${itemsTableBody.length}`);
+  console.log(`   - Header columns: ${itemsTableBody[0] ? itemsTableBody[0].length : 0}`);
+  if (itemsTableBody.length > 1) {
+    console.log(`   - First item row columns: ${itemsTableBody[1].length}`);
+    // Log first item structure
+    const firstItemRow = itemsTableBody[1];
+    console.log(`   - First item cell types:`, firstItemRow.map((cell, idx) => {
+      if (cell && cell.text) return `col${idx}:text`;
+      if (cell && cell.stack) return `col${idx}:stack`;
+      if (cell && cell.image) return `col${idx}:image`;
+      return `col${idx}:${cell ? typeof cell : 'null'}`;
+    }).join(', '));
+  }
+  
+  // Final validation - ensure all cells are valid objects
+  for (let i = 0; i < itemsTableBody.length; i++) {
+    const row = itemsTableBody[i];
+    if (!Array.isArray(row)) {
+      throw new Error(`Table row ${i} is not an array`);
+    }
+    if (row.length !== 7) {
+      throw new Error(`Table row ${i} has ${row.length} columns, expected 7`);
+    }
+    for (let j = 0; j < row.length; j++) {
+      const cell = row[j];
+      if (!cell || (typeof cell !== 'object')) {
+        throw new Error(`Table cell [${i}][${j}] is invalid: ${typeof cell}`);
+      }
+      // Ensure cell has at least one valid property
+      if (!cell.text && !cell.stack && !cell.image && !cell.columns) {
+        throw new Error(`Table cell [${i}][${j}] has no valid content (text/stack/image/columns)`);
+      }
+    }
+  }
+  console.log('✅ All table cells validated');
+  
   const docDefinition = {
     pageSize: 'A4',
-    pageMargins: [40, 80, 40, 60], // Left, Top, Right, Bottom - optimized for better pagination
+    pageMargins: [25, 20, 25, 30],
+    compress: true,
     content: [
       ...headerContent,
       {
         table: {
           headerRows: 1,
-          widths: [25, 55, '*', 55, 30, 60, 65],
+          widths: [25, '*', 50, 60, 30, 70, 75],
           body: itemsTableBody,
-          dontBreakRows: true, // Keep rows together - don't split rows across pages
-          keepWithHeaderRows: 1 // Repeat header on each new page
+          dontBreakRows: true
+          // Removed keepWithHeaderRows to prevent table being pushed to next page
         },
         layout: {
-          hLineWidth: function(i, node) { 
-            return (i === 0 || i === 1 || i === node.table.body.length) ? 1 : 0.5; 
-          },
-          vLineWidth: function() { return 0.5; },
-          hLineColor: function(i) { return i === 1 ? '#1e40af' : '#e2e8f0'; },
-          vLineColor: function() { return '#e2e8f0'; },
-          fillColor: function(rowIndex) { return rowIndex === 0 ? '#f1f5f9' : null; },
           paddingLeft: function() { return 3; },
           paddingRight: function() { return 3; },
-          paddingTop: function() { return 4; },
-          paddingBottom: function() { return 4; }
-        }
+          paddingTop: function(i, node) { return i === 0 ? 4 : 2; }, // Reduced padding
+          paddingBottom: function(i, node) { return i === 0 ? 4 : 2; }, // Reduced padding
+          defaultBorder: true,  // Set to true to enable borders - allows vLineWidth/vLineColor to work
+          hLineWidth: function(i, node) { 
+            if (i === 0 || i === node.table.body.length) return 1;  // Top and bottom borders
+            if (i === 1) return 1.5;  // Below header - thicker
+            return 0.5;  // Other rows
+          },
+          // FIX: vLineWidth must return 1 for all vertical lines (including edges)
+          // For 7 columns, there are 8 vertical lines (left edge + 6 between columns + right edge)
+          vLineWidth: function(i, node) { 
+            // Always return 1 for all vertical lines - ensures column separators are visible
+            return 1;
+          },
+          hLineColor: function(i) { 
+            if (i === 1) return '#1e40af';  // Header separator - blue
+            return '#cbd5e1';  // Other lines - gray
+          },
+          // FIX: vLineColor must return black for all vertical lines to partition columns
+          vLineColor: function(i, node) { 
+            // Pure black for all vertical lines - clear column separation
+            return '#000000';  // Black
+          },
+          fillColor: function(rowIndex) { 
+            return rowIndex === 0 ? '#f1f5f9' : null;  // Header background
+          }
+        },
+        margin: [0, 0, 0, 5]
       },
-      { text: '', margin: [0, 15, 0, 0] }, // Spacing before totals
-      {
-        ...totalsTable,
-        pageBreak: 'avoid' // Try to keep totals on same page
-      },
-      { text: '', margin: [0, 15, 0, 0] }, // Spacing before terms
+      { text: '', margin: [0, 3, 0, 0] }, // Spacing before totals
+      totalsTable,
+      { text: '', margin: [0, 3, 0, 0] }, // Spacing before terms
       ...termsSection,
-      { text: '', margin: [0, 20, 0, 0] }, // Spacing before signature
-      {
-        ...signatureSection,
-        pageBreak: 'avoid' // Keep signature section together
-      }
+      { text: '', margin: [0, 5, 0, 0] }, // Spacing before signature
+      signatureSection
     ],
     styles: {
-      companyName: { fontSize: 16, bold: true, color: '#1e3a5f' },
-      companyInfo: { fontSize: 9, color: '#64748b' },
+      companyName: { fontSize: 16, bold: true, color: '#1e3a5f', lineHeight: 1.1 },
+      companyInfo: { fontSize: 9, color: '#64748b', alignment: 'left', lineHeight: 1.1 },
       quotationTitle: { fontSize: 22, bold: true, color: '#1e3a5f' },
       quotationNumber: { fontSize: 11, color: '#64748b' },
       quotationDate: { fontSize: 10, color: '#64748b' },
       sectionLabel: { fontSize: 9, bold: true, color: '#1e3a5f' },
       customerName: { fontSize: 12, bold: true, color: '#1e293b' },
       customerInfo: { fontSize: 10, color: '#64748b' },
-      tableHeader: { fontSize: 8, bold: true, color: '#1e3a5f', margin: [0, 6, 0, 6] },
+      tableHeader: { fontSize: 9, bold: true, color: '#1e3a5f' },
       sectionTitle: { fontSize: 10, bold: true, color: '#1e3a5f' },
-      termsText: { fontSize: 8, color: '#64748b', lineHeight: 1.4 },
-      vatNote: { fontSize: 8, color: '#64748b', italics: true, lineHeight: 1.4 },
-      quotationMessage: { fontSize: 9, color: '#1e293b', lineHeight: 1.5 },
+      termsText: { fontSize: 8, color: '#64748b', lineHeight: 1.4, alignment: 'justify' },
+      vatNote: { fontSize: 8, color: '#64748b', italics: true, lineHeight: 1.4, alignment: 'justify' },
+      quotationMessage: { fontSize: 9, color: '#1e293b', lineHeight: 1.5, alignment: 'justify' },
       signatureLabel: { fontSize: 9, color: '#94a3b8' }
     },
     defaultStyle: {
@@ -608,7 +785,7 @@ async function generateQuotationPDF(quotation, settings) {
         alignment: 'center',
         fontSize: 8,
         color: '#94a3b8',
-        margin: [40, 10, 40, 0]
+        margin: [30, 5, 30, 0]
       };
     }
   };
@@ -621,8 +798,45 @@ async function generateQuotationPDF(quotation, settings) {
       }
       
       if (!itemsTableBody || itemsTableBody.length === 0) {
+        console.error('ERROR: itemsTableBody is empty or undefined');
+        console.error('Items count:', quotation.items ? quotation.items.length : 0);
         throw new Error('No items to include in PDF');
       }
+      
+      // Validate table structure
+      if (itemsTableBody.length < 2) {
+        console.error('ERROR: itemsTableBody only has header, no items');
+        throw new Error('Quotation has no items');
+      }
+      
+      // Validate each row has correct number of columns (should be 7)
+      const expectedColumns = 7;
+      for (let i = 0; i < itemsTableBody.length; i++) {
+        if (!itemsTableBody[i] || !Array.isArray(itemsTableBody[i])) {
+          console.error('ERROR: Row', i, 'is not an array');
+          throw new Error(`Invalid table row structure at index ${i}`);
+        }
+        if (itemsTableBody[i].length !== expectedColumns) {
+          console.error('ERROR: Row', i, 'has', itemsTableBody[i].length, 'columns, expected', expectedColumns);
+          throw new Error(`Invalid table row: expected ${expectedColumns} columns, got ${itemsTableBody[i].length}`);
+        }
+      }
+      
+      // Log for debugging
+      console.log('PDF Generation: itemsTableBody has', itemsTableBody.length, 'rows (1 header +', itemsTableBody.length - 1, 'items)');
+      console.log('PDF Generation: First row (header) has', itemsTableBody[0].length, 'columns');
+      
+      // CRITICAL: Verify table is in content before PDF creation
+      const tableInContent = docDefinition.content.find(item => item && item.table);
+      if (!tableInContent) {
+        console.error('❌ CRITICAL ERROR: Table not found in content array!');
+        console.error('Content items types:', docDefinition.content.map((item, idx) => 
+          `[${idx}] ${item.table ? 'TABLE' : item.text !== undefined ? 'TEXT' : item.columns ? 'COLUMNS' : typeof item}`
+        ));
+        console.error('Content array length:', docDefinition.content.length);
+        throw new Error('Table is missing from PDF content array');
+      }
+      console.log('✅ Table verified in content array');
       
       const pdfDoc = printer.createPdfKitDocument(docDefinition);
       const chunks = [];
