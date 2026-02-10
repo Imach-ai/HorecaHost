@@ -31,7 +31,7 @@ backend/uploads/logo/*
  backend/.env
  frontend/.env
  # Keep example files in repo
- !.env.example
+
 # Logs
 logs/
 *.log
