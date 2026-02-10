@@ -1,8 +1,0 @@
-﻿chore(deploy): prepare project for secure deployment
-
-- Add DEPLOYMENT.md with deployment and security guidance
-- Remove default credentials from login UI
-- Secure initial admin creation: accept ADMIN_PASSWORD or generate a strong password
-- Add Supabase placeholders to env files and .env.example
-- Replace hardcoded DB connection in code with process.env.DATABASE_URL and stub when missing
-- Fix PDF logo loading fallback
