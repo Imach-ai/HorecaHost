@@ -1,5 +1,6 @@
 const { initialize, pool } = require('../database');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 
 async function createUsersTable() {
   console.log('🔄 Creating users table...');
@@ -38,8 +39,34 @@ async function createUsersTable() {
 
     if (!existingAdmin) {
       // Create default admin user
-      // Default credentials: username: admin, password: Admin@123
-      const defaultPassword = 'Admin@123';
+      // Priority: use ADMIN_PASSWORD env var (if set and >=12 chars), otherwise generate a strong random password.
+      function generateStrongPassword(length = 16) {
+        const lower = 'abcdefghijklmnopqrstuvwxyz';
+        const upper = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+        const digits = '0123456789';
+        const symbols = '!@#$%^&*()-_=+[]{}<>?';
+        const all = lower + upper + digits + symbols;
+        let pwd = '';
+        // Ensure at least one from each class
+        pwd += lower[Math.floor(Math.random() * lower.length)];
+        pwd += upper[Math.floor(Math.random() * upper.length)];
+        pwd += digits[Math.floor(Math.random() * digits.length)];
+        pwd += symbols[Math.floor(Math.random() * symbols.length)];
+        for (let i = pwd.length; i < length; i++) {
+          pwd += all[Math.floor(Math.random() * all.length)];
+        }
+        // Shuffle
+        return pwd.split('').sort(() => 0.5 - Math.random()).join('');
+      }
+
+      const envPassword = process.env.ADMIN_PASSWORD;
+      let defaultPassword;
+      if (envPassword && envPassword.length >= 12) {
+        defaultPassword = envPassword;
+      } else {
+        defaultPassword = generateStrongPassword(16);
+      }
+
       const passwordHash = await bcrypt.hash(defaultPassword, 10);
 
       await pool.query(
@@ -49,8 +76,9 @@ async function createUsersTable() {
       );
       console.log('✅ Default admin user created');
       console.log('   Username: admin');
-      console.log('   Password: Admin@123');
-      console.log('   ⚠️  Please change the default password after first login!');
+      // IMPORTANT: we print the generated password once for the operator to save securely.
+      console.log('   Generated admin password (save this now):', defaultPassword);
+      console.log('   ⚠️  Please change the password immediately after first login and do NOT commit it.');
     } else {
       console.log('✅ Admin user already exists');
     }

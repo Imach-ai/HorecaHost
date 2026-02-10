@@ -1,22 +1,33 @@
 const { Pool } = require('pg');
 const path = require('path');
 
-// Neon DB PostgreSQL connection configuration
-// Connection string from Neon DB pooler
-// Priority: 1. Environment variable (DATABASE_URL), 2. Default Neon DB connection
-const connectionString = process.env.DATABASE_URL || 
-  'postgresql://neondb_owner:npg_PAzsW7twcy9Y@ep-morning-cloud-ahuxkfoj-pooler.c-3.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
+// PostgreSQL connection configuration
+// IMPORTANT: Do NOT hardcode production credentials here. Set DATABASE_URL as an environment variable.
+const connectionString = process.env.DATABASE_URL;
 
-// Create connection pool with retry configuration
-const pool = new Pool({
-  connectionString: connectionString,
-  ssl: {
-    rejectUnauthorized: false // Neon DB requires SSL
-  },
-  connectionTimeoutMillis: 15000, // 15 seconds timeout
-  idleTimeoutMillis: 30000,
-  max: 20, // Maximum number of clients in the pool
-});
+if (!connectionString) {
+  console.warn('⚠️  DATABASE_URL is not set. Database connections will be unavailable until you set this environment variable.');
+}
+
+// Create connection pool only if we have a connection string
+let pool;
+if (connectionString) {
+  pool = new Pool({
+    connectionString: connectionString,
+    ssl: {
+      rejectUnauthorized: false // Neon DB requires SSL
+    },
+    connectionTimeoutMillis: 15000, // 15 seconds timeout
+    idleTimeoutMillis: 30000,
+    max: 20, // Maximum number of clients in the pool
+  });
+} else {
+  // Minimal stub to avoid crashes when pool is referenced in dev without DATABASE_URL.
+  pool = {
+    query: async () => { throw new Error('DATABASE_URL not configured'); },
+    on: () => {},
+  };
+}
 
 // Test connection
 pool.on('connect', () => {

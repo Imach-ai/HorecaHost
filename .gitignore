@@ -23,14 +23,15 @@ backend/uploads/logo/*
 !backend/uploads/products/.gitkeep
 !backend/uploads/logo/.gitkeep
 
-# Environment files
-.env
-.env.local
-.env.development
-.env.production
-.env.test
-.env*.local
-
+# Environment file
+ # Environment files (ignored locally; keep .env.example tracked)
+ .env
+ .env.local
+ .env.* 
+ backend/.env
+ frontend/.env
+ # Keep example files in repo
+ !.env.example
 # Logs
 logs/
 *.log

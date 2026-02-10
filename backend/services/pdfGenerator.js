@@ -252,14 +252,28 @@ async function generateQuotationPDF(quotation, settings) {
   const vatRate = parseFloat(quotation.vat_rate || settings.vat_rate || 5);
 
   // Build header content
+  // Try to load company logo (settings.company_logo is a path like /uploads/logo/logo.png)
+  // If settings.company_logo is provided (e.g. "/uploads/logo/logo.png"), use it.
+  // Otherwise use the bundled backend logo file next to the service.
+  let logoPath;
+  if (settings && settings.company_logo) {
+    logoPath = settings.company_logo;
+  } else {
+    // Absolute path to backend/logo/horecahost_logo_new.png
+    logoPath = path.join(__dirname, '..', 'logo', 'horecahost_logo_new.png');
+  }
+  const logoBase64 = getImageBase64(logoPath);
+
   const headerContent = [];
   
-  // Company info row
+  // Company info row (left) and Quotation meta (right)
   headerContent.push({
     columns: [
       {
         width: '*',
         stack: [
+          // Insert logo if available
+          ...(logoBase64 ? [{ image: logoBase64, width: 90, alignment: 'left', margin: [0, 0, 0, 6] }] : []),
           { text: settings.company_name || 'Horeca Host', style: 'companyName', lineHeight: 1.1 },
           { text: settings.company_address || 'Dubai, U.A.E', style: 'companyInfo', margin: [0, 1, 0, 0], lineHeight: 1.1 },
           { text: (settings.company_phone ? 'Tel: ' + settings.company_phone : ''), style: 'companyInfo', margin: [0, 0.5, 0, 0], lineHeight: 1.1 },

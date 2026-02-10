@@ -109,17 +109,19 @@ FTP_SECURE=false
 
 ### Step 4: Database Setup
 
-The database will be automatically initialized on first run. To set up the initial admin user:
+The database will be automatically initialized on first run. To set up the initial admin user, run the script below.
+
+The script will use the `ADMIN_PASSWORD` environment variable if provided (recommended). If not provided, it will generate a strong random password and print it once — save it securely.
 
 ```bash
+# Option A: provide an initial password (recommended)
+ADMIN_PASSWORD='Your$trongP@ssw0rd!' node backend/scripts/create-users-table.js
+
+# Option B: let the script generate and show a secure password once
 node backend/scripts/create-users-table.js
 ```
 
-Default credentials:
-- **Username**: `admin`
-- **Password**: `Admin@123`
-
-⚠️ **Important**: Change the default password immediately after first login!
+⚠️ **Important**: Change the admin password immediately after first login and never commit passwords to source control.
 
 ### Step 5: Import Sample Data (Optional)
 

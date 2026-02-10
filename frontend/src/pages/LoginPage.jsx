@@ -129,11 +129,7 @@ function LoginPage() {
               )}
             </button>
 
-            <div className="text-center text-sm text-gray-500 dark:text-slate-400 pt-4 border-t border-gray-200 dark:border-slate-700">
-              <p>Default credentials:</p>
-              <p className="font-mono text-xs mt-1">Username: admin</p>
-              <p className="font-mono text-xs">Password: Admin@123</p>
-            </div>
+            {/* Removed default credentials display for security */}
           </form>
         </div>
 
