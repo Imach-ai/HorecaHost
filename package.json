@@ -14,6 +14,7 @@
     "build": "cd frontend && npm run build",
     "start": "node backend/server.js",
     "seed": "node backend/seed.js"
+    , "reset-admin-password": "node backend/scripts/reset-admin-password.js"
   },
   "dependencies": {
     "basic-ftp": "^5.1.0",

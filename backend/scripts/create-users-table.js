@@ -33,8 +33,11 @@ async function createUsersTable() {
     `);
     console.log('✅ Index on username created');
 
+    // Determine admin username from env or default to 'admin'
+    const adminUser = process.env.ADMIN_USERNAME || 'admin';
+
     // Check if admin user exists
-    const checkResult = await pool.query('SELECT id FROM users WHERE username = $1', ['admin']);
+    const checkResult = await pool.query('SELECT id FROM users WHERE username = $1', [adminUser]);
     const existingAdmin = checkResult.rows[0];
 
     if (!existingAdmin) {
@@ -72,10 +75,10 @@ async function createUsersTable() {
       await pool.query(
         `INSERT INTO users (username, password_hash, role, active)
          VALUES ($1, $2, 'admin', true)`,
-        ['admin', passwordHash]
+        [adminUser, passwordHash]
       );
       console.log('✅ Default admin user created');
-      console.log('   Username: admin');
+      console.log(`   Username: ${adminUser}`);
       // IMPORTANT: we print the generated password once for the operator to save securely.
       console.log('   Generated admin password (save this now):', defaultPassword);
       console.log('   ⚠️  Please change the password immediately after first login and do NOT commit it.');
